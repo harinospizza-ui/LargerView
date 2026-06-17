@@ -237,6 +237,7 @@ const App: React.FC = () => {
         if (items.length === 0) {
           console.log('Seeding database menu_items...');
           await seedMenuItemsToServer(MENU_ITEMS);
+          setMenuItems(extendMenuItemsWithGeneratedSeries(MENU_ITEMS));
         } else {
           setMenuItems(extendMenuItemsWithGeneratedSeries(items));
         }
@@ -245,6 +246,7 @@ const App: React.FC = () => {
         if (outletList.length === 0) {
           console.log('Seeding database outlets...');
           await seedOutletsToServer(OUTLET_LOCATIONS);
+          setOutlets(OUTLET_LOCATIONS);
         } else {
           setOutlets(outletList);
         }
@@ -253,6 +255,7 @@ const App: React.FC = () => {
         if (offerList.length === 0) {
           console.log('Seeding database offers...');
           await seedOffersToServer(OFFER_CARDS);
+          setOffers(OFFER_CARDS);
         } else {
           setOffers(offerList);
         }

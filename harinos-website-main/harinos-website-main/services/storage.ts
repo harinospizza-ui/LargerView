@@ -1,5 +1,5 @@
 
-import { AdminSession, CustomerProfile, Order } from '../types';
+import { AdminSession, CustomerProfile, Order, WalletTransaction, MenuItem, OutletConfig, OfferCard } from '../types';
 import { safeStorage } from './browserSupport';
 
 const KEYS = {
@@ -9,6 +9,12 @@ const KEYS = {
   CUSTOMER_PROFILE: 'harinos_customer_profile',
   VERIFIED_CUSTOMERS: 'harinos_verified_customers',
   FCM_TOKEN: 'harinos_fcm_token',
+  ADMIN_ORDERS: 'harinos_admin_orders',
+  ADMIN_CUSTOMERS: 'harinos_admin_customers',
+  ADMIN_TRANSACTIONS: 'harinos_admin_transactions',
+  ADMIN_MENU_ITEMS: 'harinos_admin_menu_items',
+  ADMIN_OUTLETS: 'harinos_admin_outlets',
+  ADMIN_OFFERS: 'harinos_admin_offers',
 };
 
 const readJson = <T,>(key: string, fallback: T): T => {
@@ -77,4 +83,18 @@ export const StorageService = {
   clearFCMToken: (): void => {
     safeStorage.removeItem(window.localStorage, KEYS.FCM_TOKEN);
   },
+  
+  // Local admin fallback methods
+  getAdminOrders: (): Order[] => readJson<Order[]>(KEYS.ADMIN_ORDERS, []),
+  saveAdminOrders: (orders: Order[]): void => writeJson(KEYS.ADMIN_ORDERS, orders),
+  getAdminCustomers: (): CustomerProfile[] => readJson<CustomerProfile[]>(KEYS.ADMIN_CUSTOMERS, []),
+  saveAdminCustomers: (customers: CustomerProfile[]): void => writeJson(KEYS.ADMIN_CUSTOMERS, customers),
+  getAdminTransactions: (): WalletTransaction[] => readJson<WalletTransaction[]>(KEYS.ADMIN_TRANSACTIONS, []),
+  saveAdminTransactions: (transactions: WalletTransaction[]): void => writeJson(KEYS.ADMIN_TRANSACTIONS, transactions),
+  getAdminMenuItems: (): MenuItem[] => readJson<MenuItem[]>(KEYS.ADMIN_MENU_ITEMS, []),
+  saveAdminMenuItems: (items: MenuItem[]): void => writeJson(KEYS.ADMIN_MENU_ITEMS, items),
+  getAdminOutlets: (): OutletConfig[] => readJson<OutletConfig[]>(KEYS.ADMIN_OUTLETS, []),
+  saveAdminOutlets: (outlets: OutletConfig[]): void => writeJson(KEYS.ADMIN_OUTLETS, outlets),
+  getAdminOffers: (): OfferCard[] => readJson<OfferCard[]>(KEYS.ADMIN_OFFERS, []),
+  saveAdminOffers: (offers: OfferCard[]): void => writeJson(KEYS.ADMIN_OFFERS, offers),
 };

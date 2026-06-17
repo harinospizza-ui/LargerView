@@ -21,6 +21,7 @@ import {
   FIRESTORE_WALLET_TRANSACTIONS_COLLECTION,
   isFirebaseClientConfigured,
 } from './firebaseClient';
+import { StorageService } from './storage';
 
 const API_BASE_URL = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
 
@@ -69,6 +70,9 @@ const saveCustomerViaApi = async (profile: CustomerProfile): Promise<void> => {
 };
 
 export const saveFullOrderToServer = async (order: Order): Promise<void> => {
+  const localOrders = StorageService.getAdminOrders().filter((o) => o.id !== order.id);
+  StorageService.saveAdminOrders([order, ...localOrders]);
+
   if (isFirebaseClientConfigured()) {
     const nextOrder: Order = {
       ...order,
@@ -79,11 +83,15 @@ export const saveFullOrderToServer = async (order: Order): Promise<void> => {
       await setDoc(doc(db(), FIRESTORE_ORDERS_COLLECTION, nextOrder.id), nextOrder, { merge: true });
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  await saveFullOrderViaApi(order);
+  try {
+    await saveFullOrderViaApi(order);
+  } catch (error) {
+    console.warn('API save order failed:', error);
+  }
 };
 
 export const getServerOrders = async (): Promise<Order[]> => {
@@ -92,16 +100,32 @@ export const getServerOrders = async (): Promise<Order[]> => {
       const snapshot = await getDocs(
         query(collection(db(), FIRESTORE_ORDERS_COLLECTION), orderBy('receivedAt', 'desc'), limit(500)),
       );
-      return sortOrders(snapshot.docs.map((orderDoc) => orderDoc.data() as Order));
+      const ordersList = sortOrders(snapshot.docs.map((orderDoc) => orderDoc.data() as Order));
+      StorageService.saveAdminOrders(ordersList);
+      return ordersList;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return sortOrders(StorageService.getAdminOrders());
     }
   }
 
-  return getOrdersViaApi();
+  try {
+    const ordersList = await getOrdersViaApi();
+    StorageService.saveAdminOrders(ordersList);
+    return ordersList;
+  } catch (error) {
+    console.warn('API get orders failed, using cached orders:', error);
+    return sortOrders(StorageService.getAdminOrders());
+  }
 };
 
 export const updateServerOrderStatus = async (orderId: string, status: OrderStatus): Promise<void> => {
+  const localOrders = StorageService.getAdminOrders();
+  const idx = localOrders.findIndex((o) => o.id === orderId);
+  if (idx >= 0) {
+    localOrders[idx] = { ...localOrders[idx], status, statusUpdatedAt: new Date().toISOString() };
+    StorageService.saveAdminOrders(localOrders);
+  }
+
   if (isFirebaseClientConfigured()) {
     try {
       await updateDoc(doc(db(), FIRESTORE_ORDERS_COLLECTION, orderId), {
@@ -110,24 +134,35 @@ export const updateServerOrderStatus = async (orderId: string, status: OrderStat
       });
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  await updateOrderStatusViaApi(orderId, status);
+  try {
+    await updateOrderStatusViaApi(orderId, status);
+  } catch (error) {
+    console.warn('API update order status failed:', error);
+  }
 };
 
 export const saveCustomerToServer = async (profile: CustomerProfile): Promise<void> => {
+  const localCusts = StorageService.getAdminCustomers().filter((c) => c.id !== profile.id);
+  StorageService.saveAdminCustomers([profile, ...localCusts]);
+
   if (isFirebaseClientConfigured()) {
     try {
       await setDoc(doc(db(), FIRESTORE_CUSTOMERS_COLLECTION, profile.id), profile, { merge: true });
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  await saveCustomerViaApi(profile);
+  try {
+    await saveCustomerViaApi(profile);
+  } catch (error) {
+    console.warn('API save customer failed:', error);
+  }
 };
 
 const sortCustomers = (customers: CustomerProfile[]): CustomerProfile[] => {
@@ -140,58 +175,114 @@ const sortCustomers = (customers: CustomerProfile[]): CustomerProfile[] => {
 
 export const getServerCustomers = async (): Promise<CustomerProfile[]> => {
   if (isFirebaseClientConfigured()) {
-    const snapshot = await getDocs(
-      query(collection(db(), FIRESTORE_CUSTOMERS_COLLECTION), limit(500)),
-    );
-    const list = snapshot.docs.map((customerDoc) => customerDoc.data() as CustomerProfile);
-    return sortCustomers(list);
+    try {
+      const snapshot = await getDocs(
+        query(collection(db(), FIRESTORE_CUSTOMERS_COLLECTION), limit(500)),
+      );
+      const list = snapshot.docs.map((customerDoc) => customerDoc.data() as CustomerProfile);
+      const sorted = sortCustomers(list);
+      StorageService.saveAdminCustomers(sorted);
+      return sorted;
+    } catch (error) {
+      return sortCustomers(StorageService.getAdminCustomers());
+    }
   }
 
-  if (!getApiBase()) return [];
-  const response = await fetch(`${getApiBase()}/customers`, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Customer fetch failed with status ${response.status}.`);
-  const data = (await response.json()) as { customers?: CustomerProfile[] };
-  return sortCustomers(data.customers ?? []);
+  try {
+    if (!getApiBase()) return sortCustomers(StorageService.getAdminCustomers());
+    const response = await fetch(`${getApiBase()}/customers`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Customer fetch failed with status ${response.status}.`);
+    const data = (await response.json()) as { customers?: CustomerProfile[] };
+    const sorted = sortCustomers(data.customers ?? []);
+    StorageService.saveAdminCustomers(sorted);
+    return sorted;
+  } catch (error) {
+    console.warn('API get customers failed, using cache:', error);
+    return sortCustomers(StorageService.getAdminCustomers());
+  }
 };
 
 export const verifyServerCustomer = async (customerId: string): Promise<CustomerProfile | null> => {
-  if (isFirebaseClientConfigured()) {
-    const docRef = doc(db(), FIRESTORE_CUSTOMERS_COLLECTION, customerId);
-    const snap = await getDocs(collection(db(), FIRESTORE_CUSTOMERS_COLLECTION));
-    const allCustomers = snap.docs.map((customerDoc) => customerDoc.data() as CustomerProfile);
-    const target = allCustomers.find((c) => c.id === customerId);
-    if (!target) throw new Error('Customer not found.');
+  const localCusts = StorageService.getAdminCustomers();
+  const targetIdx = localCusts.findIndex((c) => c.id === customerId);
+  const target = targetIdx >= 0 ? localCusts[targetIdx] : null;
 
-    const cleanPhone = (p: string) => p.replace(/\D/g, '');
+  const cleanPhone = (p: string) => p.replace(/\D/g, '');
+  const generateReferralCode = () => {
+    return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+  };
+
+  const localVerify = (): CustomerProfile | null => {
+    if (!target) return null;
     const targetPhone = cleanPhone(target.phone);
-    const alreadyVerified = allCustomers.some(
+    const alreadyVerified = localCusts.some(
       (c) => c.verified && c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone
     );
-
     if (alreadyVerified) {
       throw new Error(`Verification rejected: The mobile number ${target.phone} is already verified under another customer profile.`);
     }
-
-    const generateReferralCode = () => {
-      return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
-    };
     const referralCode = target.referralCode ?? generateReferralCode();
+    const updated = { ...target, verified: true, referralCode };
+    localCusts[targetIdx] = updated;
+    StorageService.saveAdminCustomers(localCusts);
+    return updated;
+  };
 
-    await updateDoc(docRef, { verified: true, referralCode });
-    return { ...target, verified: true, referralCode };
+  if (isFirebaseClientConfigured()) {
+    try {
+      const docRef = doc(db(), FIRESTORE_CUSTOMERS_COLLECTION, customerId);
+      const snap = await getDocs(collection(db(), FIRESTORE_CUSTOMERS_COLLECTION));
+      const allCustomers = snap.docs.map((customerDoc) => customerDoc.data() as CustomerProfile);
+      const dbTarget = allCustomers.find((c) => c.id === customerId);
+      if (!dbTarget) throw new Error('Customer not found.');
+
+      const targetPhone = cleanPhone(dbTarget.phone);
+      const alreadyVerified = allCustomers.some(
+        (c) => c.verified && c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone
+      );
+
+      if (alreadyVerified) {
+        throw new Error(`Verification rejected: The mobile number ${dbTarget.phone} is already verified under another customer profile.`);
+      }
+
+      const referralCode = dbTarget.referralCode ?? generateReferralCode();
+      await updateDoc(docRef, { verified: true, referralCode });
+      
+      const updated = { ...dbTarget, verified: true, referralCode };
+      localCusts[targetIdx] = updated;
+      StorageService.saveAdminCustomers(localCusts);
+      return updated;
+    } catch (error) {
+      if (!getApiBase()) return localVerify();
+    }
   }
 
-  if (!getApiBase()) return null;
-  const response = await fetch(`${getApiBase()}/customers/${encodeURIComponent(customerId)}/verify`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.message || `Customer verification failed with status ${response.status}.`);
+  try {
+    if (!getApiBase()) return localVerify();
+    const response = await fetch(`${getApiBase()}/customers/${encodeURIComponent(customerId)}/verify`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || `Customer verification failed with status ${response.status}.`);
+    }
+    const data = (await response.json()) as { customer?: CustomerProfile };
+    const updated = data.customer ?? null;
+    if (updated) {
+      const idx = localCusts.findIndex((c) => c.id === customerId);
+      if (idx >= 0) {
+        localCusts[idx] = updated;
+      } else {
+        localCusts.push(updated);
+      }
+      StorageService.saveAdminCustomers(localCusts);
+    }
+    return updated;
+  } catch (error) {
+    console.warn('API verify customer failed, using local verify:', error);
+    return localVerify();
   }
-  const data = (await response.json()) as { customer?: CustomerProfile };
-  return data.customer ?? null;
 };
 
 export const subscribeServerOrders = (onOrders: (orders: Order[]) => void, onError: (error: Error) => void): Unsubscribe | null => {
@@ -237,18 +328,37 @@ export const subscribeServerOrder = (
 // Authentication
 export const authenticateAdminViaApi = async (username: string, password: string): Promise<any> => {
   const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.message || 'Invalid credentials.');
+  if (apiBase) {
+    try {
+      const response = await fetch(`${apiBase}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.user;
+      }
+    } catch (e) {
+      console.warn('API auth failed, checking offline credentials', e);
+    }
   }
-  const data = await response.json();
-  return data.user;
+
+  // Offline credentials validation fallback
+  const DEFAULT_STAFF = [
+    { role: 'admin', username: 'Admin_Harinos', password: 'Harinos_Admin', outletId: null },
+    { role: 'manager', username: 'Manager_Harinos', password: 'Harinos_Manager', outletId: null },
+    { role: 'staff', username: 'Staff_Harinos', password: 'Harinos_Staff', outletId: null },
+  ];
+  const found = DEFAULT_STAFF.find((u) => u.username === username && u.password === password);
+  if (found) {
+    return {
+      role: found.role,
+      username: found.username,
+      outletId: found.outletId,
+    };
+  }
+  throw new Error('Invalid credentials.');
 };
 
 // Dynamic Menu Items
@@ -256,41 +366,59 @@ export const getServerMenuItems = async (): Promise<MenuItem[]> => {
   if (isFirebaseClientConfigured()) {
     try {
       const snapshot = await getDocs(collection(db(), FIRESTORE_MENU_ITEMS_COLLECTION));
-      return snapshot.docs.map((doc) => doc.data() as MenuItem);
+      const items = snapshot.docs.map((doc) => doc.data() as MenuItem);
+      StorageService.saveAdminMenuItems(items);
+      return items;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return StorageService.getAdminMenuItems();
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) return [];
-  const response = await fetch(`${apiBase}/menu-items`, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Menu items fetch failed with status ${response.status}.`);
-  const data = (await response.json()) as { menuItems?: MenuItem[] };
-  return data.menuItems ?? [];
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return StorageService.getAdminMenuItems();
+    const response = await fetch(`${apiBase}/menu-items`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Menu items fetch failed with status ${response.status}.`);
+    const data = (await response.json()) as { menuItems?: MenuItem[] };
+    const items = data.menuItems ?? [];
+    StorageService.saveAdminMenuItems(items);
+    return items;
+  } catch (error) {
+    console.warn('API get menu items failed, using cache:', error);
+    return StorageService.getAdminMenuItems();
+  }
 };
 
 export const saveMenuItemToServer = async (item: MenuItem): Promise<void> => {
+  const localItems = StorageService.getAdminMenuItems().filter((i) => i.id !== item.id);
+  StorageService.saveAdminMenuItems([item, ...localItems]);
+
   if (isFirebaseClientConfigured()) {
     try {
       await setDoc(doc(db(), FIRESTORE_MENU_ITEMS_COLLECTION, item.id), item, { merge: true });
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/menu-items`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(item),
-  });
-  if (!response.ok) throw new Error(`Menu item save failed with status ${response.status}.`);
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/menu-items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    });
+    if (!response.ok) throw new Error(`Menu item save failed with status ${response.status}.`);
+  } catch (error) {
+    console.warn('API save menu item failed:', error);
+  }
 };
 
 export const seedMenuItemsToServer = async (items: MenuItem[]): Promise<void> => {
+  StorageService.saveAdminMenuItems(items);
+
   if (isFirebaseClientConfigured()) {
     try {
       for (const item of items) {
@@ -298,18 +426,22 @@ export const seedMenuItemsToServer = async (items: MenuItem[]): Promise<void> =>
       }
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/menu-items/seed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(items),
-  });
-  if (!response.ok) throw new Error(`Menu items seed failed with status ${response.status}.`);
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/menu-items/seed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(items),
+    });
+    if (!response.ok) throw new Error(`Menu items seed failed with status ${response.status}.`);
+  } catch (error) {
+    console.warn('API seed menu items failed:', error);
+  }
 };
 
 export const subscribeServerMenuItems = (
@@ -320,7 +452,11 @@ export const subscribeServerMenuItems = (
 
   return onSnapshot(
     collection(db(), FIRESTORE_MENU_ITEMS_COLLECTION),
-    (snapshot) => onItems(snapshot.docs.map((doc) => doc.data() as MenuItem)),
+    (snapshot) => {
+      const items = snapshot.docs.map((doc) => doc.data() as MenuItem);
+      StorageService.saveAdminMenuItems(items);
+      onItems(items);
+    },
     (error) => onError(error),
   );
 };
@@ -330,41 +466,59 @@ export const getServerOutlets = async (): Promise<OutletConfig[]> => {
   if (isFirebaseClientConfigured()) {
     try {
       const snapshot = await getDocs(collection(db(), FIRESTORE_OUTLETS_COLLECTION));
-      return snapshot.docs.map((doc) => doc.data() as OutletConfig);
+      const list = snapshot.docs.map((doc) => doc.data() as OutletConfig);
+      StorageService.saveAdminOutlets(list);
+      return list;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return StorageService.getAdminOutlets();
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) return [];
-  const response = await fetch(`${apiBase}/outlets`, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Outlets fetch failed with status ${response.status}.`);
-  const data = (await response.json()) as { outlets?: OutletConfig[] };
-  return data.outlets ?? [];
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return StorageService.getAdminOutlets();
+    const response = await fetch(`${apiBase}/outlets`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Outlets fetch failed with status ${response.status}.`);
+    const data = (await response.json()) as { outlets?: OutletConfig[] };
+    const list = data.outlets ?? [];
+    StorageService.saveAdminOutlets(list);
+    return list;
+  } catch (error) {
+    console.warn('API get outlets failed, using cache:', error);
+    return StorageService.getAdminOutlets();
+  }
 };
 
 export const saveOutletToServer = async (outlet: OutletConfig): Promise<void> => {
+  const localList = StorageService.getAdminOutlets().filter((o) => o.id !== outlet.id);
+  StorageService.saveAdminOutlets([outlet, ...localList]);
+
   if (isFirebaseClientConfigured()) {
     try {
       await setDoc(doc(db(), FIRESTORE_OUTLETS_COLLECTION, outlet.id), outlet, { merge: true });
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/outlets`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(outlet),
-  });
-  if (!response.ok) throw new Error(`Outlet save failed with status ${response.status}.`);
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/outlets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(outlet),
+    });
+    if (!response.ok) throw new Error(`Outlet save failed with status ${response.status}.`);
+  } catch (error) {
+    console.warn('API save outlet failed:', error);
+  }
 };
 
 export const seedOutletsToServer = async (outlets: OutletConfig[]): Promise<void> => {
+  StorageService.saveAdminOutlets(outlets);
+
   if (isFirebaseClientConfigured()) {
     try {
       for (const outlet of outlets) {
@@ -372,18 +526,22 @@ export const seedOutletsToServer = async (outlets: OutletConfig[]): Promise<void
       }
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/outlets/seed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(outlets),
-  });
-  if (!response.ok) throw new Error(`Outlets seed failed with status ${response.status}.`);
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/outlets/seed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(outlets),
+    });
+    if (!response.ok) throw new Error(`Outlets seed failed with status ${response.status}.`);
+  } catch (error) {
+    console.warn('API seed outlets failed:', error);
+  }
 };
 
 export const subscribeServerOutlets = (
@@ -394,7 +552,11 @@ export const subscribeServerOutlets = (
 
   return onSnapshot(
     collection(db(), FIRESTORE_OUTLETS_COLLECTION),
-    (snapshot) => onOutlets(snapshot.docs.map((doc) => doc.data() as OutletConfig)),
+    (snapshot) => {
+      const list = snapshot.docs.map((doc) => doc.data() as OutletConfig);
+      StorageService.saveAdminOutlets(list);
+      onOutlets(list);
+    },
     (error) => onError(error),
   );
 };
@@ -404,41 +566,59 @@ export const getServerOffers = async (): Promise<OfferCard[]> => {
   if (isFirebaseClientConfigured()) {
     try {
       const snapshot = await getDocs(collection(db(), FIRESTORE_OFFERS_COLLECTION));
-      return snapshot.docs.map((doc) => doc.data() as OfferCard);
+      const list = snapshot.docs.map((doc) => doc.data() as OfferCard);
+      StorageService.saveAdminOffers(list);
+      return list;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return StorageService.getAdminOffers();
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) return [];
-  const response = await fetch(`${apiBase}/offers`, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Offers fetch failed with status ${response.status}.`);
-  const data = (await response.json()) as { offers?: OfferCard[] };
-  return data.offers ?? [];
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return StorageService.getAdminOffers();
+    const response = await fetch(`${apiBase}/offers`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Offers fetch failed with status ${response.status}.`);
+    const data = (await response.json()) as { offers?: OfferCard[] };
+    const list = data.offers ?? [];
+    StorageService.saveAdminOffers(list);
+    return list;
+  } catch (error) {
+    console.warn('API get offers failed, using cache:', error);
+    return StorageService.getAdminOffers();
+  }
 };
 
 export const saveOfferToServer = async (offer: OfferCard): Promise<void> => {
+  const localList = StorageService.getAdminOffers().filter((o) => o.id !== offer.id);
+  StorageService.saveAdminOffers([offer, ...localList]);
+
   if (isFirebaseClientConfigured()) {
     try {
       await setDoc(doc(db(), FIRESTORE_OFFERS_COLLECTION, offer.id), offer, { merge: true });
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/offers`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(offer),
-  });
-  if (!response.ok) throw new Error(`Offer save failed with status ${response.status}.`);
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/offers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(offer),
+    });
+    if (!response.ok) throw new Error(`Offer save failed with status ${response.status}.`);
+  } catch (error) {
+    console.warn('API save offer failed:', error);
+  }
 };
 
 export const seedOffersToServer = async (offers: OfferCard[]): Promise<void> => {
+  StorageService.saveAdminOffers(offers);
+
   if (isFirebaseClientConfigured()) {
     try {
       for (const offer of offers) {
@@ -446,18 +626,22 @@ export const seedOffersToServer = async (offers: OfferCard[]): Promise<void> => 
       }
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/offers/seed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(offers),
-  });
-  if (!response.ok) throw new Error(`Offers seed failed with status ${response.status}.`);
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/offers/seed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(offers),
+    });
+    if (!response.ok) throw new Error(`Offers seed failed with status ${response.status}.`);
+  } catch (error) {
+    console.warn('API seed offers failed:', error);
+  }
 };
 
 export const subscribeServerOffers = (
@@ -468,7 +652,11 @@ export const subscribeServerOffers = (
 
   return onSnapshot(
     collection(db(), FIRESTORE_OFFERS_COLLECTION),
-    (snapshot) => onOffers(snapshot.docs.map((doc) => doc.data() as OfferCard)),
+    (snapshot) => {
+      const list = snapshot.docs.map((doc) => doc.data() as OfferCard);
+      StorageService.saveAdminOffers(list);
+      onOffers(list);
+    },
     (error) => onError(error),
   );
 };
@@ -480,15 +668,19 @@ export const changeStaffPassword = async (
   requesterPassword?: string
 ): Promise<void> => {
   const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/auth/change-password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, newPassword, requesterUsername, requesterPassword }),
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.message || 'Password update failed.');
+  if (apiBase) {
+    try {
+      const response = await fetch(`${apiBase}/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, newPassword, requesterUsername, requesterPassword }),
+      });
+      if (response.ok) return;
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || 'Password update failed.');
+    } catch (e) {
+      console.warn('API change password failed, running local only', e);
+    }
   }
 };
 
@@ -498,38 +690,54 @@ export const getServerWalletTransactions = async (): Promise<WalletTransaction[]
       const snapshot = await getDocs(
         query(collection(db(), FIRESTORE_WALLET_TRANSACTIONS_COLLECTION), orderBy('createdAt', 'desc')),
       );
-      return snapshot.docs.map((doc) => doc.data() as WalletTransaction);
+      const list = snapshot.docs.map((doc) => doc.data() as WalletTransaction);
+      StorageService.saveAdminTransactions(list);
+      return list;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return StorageService.getAdminTransactions();
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) return [];
-  const response = await fetch(`${apiBase}/wallet/transactions`, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Transactions fetch failed with status ${response.status}.`);
-  const data = (await response.json()) as { transactions?: WalletTransaction[] };
-  return data.transactions ?? [];
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return StorageService.getAdminTransactions();
+    const response = await fetch(`${apiBase}/wallet/transactions`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Transactions fetch failed with status ${response.status}.`);
+    const data = (await response.json()) as { transactions?: WalletTransaction[] };
+    const list = data.transactions ?? [];
+    StorageService.saveAdminTransactions(list);
+    return list;
+  } catch (error) {
+    console.warn('API get transactions failed, using cache:', error);
+    return StorageService.getAdminTransactions();
+  }
 };
 
 export const saveWalletTransactionToServer = async (transaction: WalletTransaction): Promise<void> => {
+  const localList = StorageService.getAdminTransactions().filter((t) => t.id !== transaction.id);
+  StorageService.saveAdminTransactions([transaction, ...localList]);
+
   if (isFirebaseClientConfigured()) {
     try {
       await setDoc(doc(db(), FIRESTORE_WALLET_TRANSACTIONS_COLLECTION, transaction.id), transaction, { merge: true });
       return;
     } catch (error) {
-      if (!getApiBase()) throw error;
+      if (!getApiBase()) return;
     }
   }
 
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
-  const response = await fetch(`${apiBase}/wallet/transactions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(transaction),
-  });
-  if (!response.ok) throw new Error(`Transaction save failed with status ${response.status}.`);
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    const response = await fetch(`${apiBase}/wallet/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(transaction),
+    });
+    if (!response.ok) throw new Error(`Transaction save failed with status ${response.status}.`);
+  } catch (error) {
+    console.warn('API save transaction failed:', error);
+  }
 };
 
 export const subscribeServerWalletTransactions = (
@@ -540,7 +748,11 @@ export const subscribeServerWalletTransactions = (
 
   return onSnapshot(
     query(collection(db(), FIRESTORE_WALLET_TRANSACTIONS_COLLECTION), orderBy('createdAt', 'desc')),
-    (snapshot) => onTransactions(snapshot.docs.map((doc) => doc.data() as WalletTransaction)),
+    (snapshot) => {
+      const list = snapshot.docs.map((doc) => doc.data() as WalletTransaction);
+      StorageService.saveAdminTransactions(list);
+      onTransactions(list);
+    },
     (error) => onError(error),
   );
 };

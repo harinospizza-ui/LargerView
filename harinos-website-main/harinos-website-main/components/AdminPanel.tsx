@@ -490,7 +490,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
         >
           Orders
         </button>
-        {session.role === 'admin' && (
+        {(session.role === 'admin' || session.role === 'manager') && (
           <button
             onClick={() => setActiveTab('wallets')}
             className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium btn-hover-scale ${
@@ -499,7 +499,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
                 : 'bg-white/[0.03] border-white/5 text-slate-400 hover:text-white hover:bg-white/[0.08]'
             }`}
           >
-            Wallets
+            Wallets & Customers
           </button>
         )}
         {(session.role === 'admin' || session.role === 'manager') && (
@@ -564,57 +564,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
             </div>
           )}
 
-          {(session.role === 'admin' || session.role === 'manager') && (
-            <section className="relative mx-auto max-w-6xl p-4">
-              <h3 className="mb-3 font-display text-2xl font-bold">Customer Verification</h3>
-              <div className="grid gap-3 md:grid-cols-2">
-                {customers.map((customer) => {
-                  const verified = StorageService.getVerifiedCustomers()[customer.id] || customer.verified;
-                  const message = encodeURIComponent(`Thank you for joining our family, ${customer.name}. Your Harino's account is verified.`);
-                  return (
-                    <div key={customer.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 shadow-2xl shadow-black/20">
-                      <div className="font-bold">{customer.name} {verified ? '(Verified)' : '(Pending)'}</div>
-                      <div className="text-sm text-slate-400">{customer.phone} {customer.email ? `- ${customer.email}` : ''}</div>
-                      {!verified && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            onClick={async () => {
-                              const otp = Math.floor(100000 + Math.random() * 900000).toString();
-                              try {
-                                const updatedCustomer = {
-                                  ...customer,
-                                  otp: otp
-                                };
-                                await saveCustomerToServer(updatedCustomer);
-                                alert(`Generated OTP for ${customer.name}: ${otp}\nPlease verify this code with the customer.`);
-                                const messageText = `Your Harino's verification OTP is ${otp}. Please enter this OTP in your Profile section to verify your account.`;
-                                const whatsappUrl = `https://wa.me/${normalizePhoneForWhatsApp(customer.phone)}?text=${encodeURIComponent(messageText)}`;
-                                window.open(whatsappUrl, '_blank');
-                              } catch (err) {
-                                console.error('Failed to save OTP to customer profile:', err);
-                                alert('Failed to generate and save OTP. Please try again.');
-                              }
-                            }}
-                            className="rounded-xl bg-green-700 px-4 py-2 text-xs font-black uppercase tracking-widest hover:bg-green-600 transition-premium"
-                          >
-                            Send OTP
-                          </button>
-                          <button
-                            onClick={() => verifyCustomer(customer)}
-                            className="rounded-xl bg-red-600 px-4 py-2 text-xs font-black uppercase tracking-widest hover:bg-red-500 transition-premium"
-                          >
-                            Verified
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {!customers.length && <div className="text-sm text-slate-500">No online customer profiles found yet.</div>}
-              </div>
-            </section>
-          )}
-
           {/* Date Slabs grouped collapsible orders */}
           <section className="relative mx-auto max-w-6xl p-4">
             <h3 className="mb-3 font-display text-2xl font-bold">Orders</h3>
@@ -641,7 +590,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
                     {isExpanded && (
                       <div className="p-4 grid gap-3">
                         {dateOrders.map((order) => (
-                          <div key={order.id} className="rounded-2xl p-4 shadow-[0_22px_60px_rgba(0,0,0,0.28)] glass-card glass-card-hover animate-slide-up">
+                           <div key={order.id} className="rounded-2xl p-4 shadow-[0_22px_60px_rgba(0,0,0,0.28)] glass-card glass-card-hover animate-slide-up">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div>
                                 <div className="flex flex-wrap items-center gap-2">
@@ -703,10 +652,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
         </>
       )}
 
-      {/* Wallet Management Ledger Tab (Admin Only) */}
-      {activeTab === 'wallets' && session.role === 'admin' && (
+      {/* Wallet & Customers Tab (Admin & Manager) */}
+      {activeTab === 'wallets' && (session.role === 'admin' || session.role === 'manager') && (
         <section className="relative mx-auto max-w-6xl p-4 animate-slide-up">
-          <h3 className="mb-4 font-display text-2xl font-bold font-black">Customer Wallets & Ledger</h3>
+          <h3 className="mb-4 font-display text-2xl font-bold font-black">Wallets & Customers Control</h3>
           
           {/* Search Bar */}
           <div className="mb-6">
@@ -718,6 +667,79 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
               onChange={(e) => setWalletSearchQuery(e.target.value)}
               className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 text-white outline-none focus:border-red-500 font-bold transition focus:bg-white/10"
             />
+          </div>
+
+          {/* Customer Verification Section */}
+          <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-5 mb-6">
+            <h4 className="font-display font-bold text-lg mb-4 text-red-300">Customer Verification Management</h4>
+            <div className="grid gap-3 md:grid-cols-2">
+              {customers
+                .filter((cust) => {
+                  const query = walletSearchQuery.toLowerCase().trim();
+                  if (!query) return true;
+                  return (
+                    cust.name.toLowerCase().includes(query) ||
+                    cust.phone.includes(query)
+                  );
+                })
+                .map((customer) => {
+                  const verified = StorageService.getVerifiedCustomers()[customer.id] || customer.verified;
+                  return (
+                    <div key={customer.id} className="rounded-2xl border border-white/5 bg-white/[0.05] p-4 flex flex-col justify-between shadow-2xl">
+                      <div>
+                        <div className="font-bold flex items-center gap-2">
+                          <span className="text-white text-base">{customer.name}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-widest ${verified ? 'bg-green-500/20 text-green-300 border border-green-500/20' : 'bg-amber-500/20 text-amber-300 border border-amber-500/20'}`}>
+                            {verified ? 'Verified' : 'Pending'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-400 mt-1">Ph: {customer.phone} {customer.email ? `- ${customer.email}` : ''}</div>
+                        {customer.referralCode && (
+                          <div className="text-[10px] text-red-400 mt-1 font-bold">Referral Code: {customer.referralCode}</div>
+                        )}
+                      </div>
+                      {!verified && (
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={async () => {
+                              const otp = Math.floor(100000 + Math.random() * 900000).toString();
+                              try {
+                                const updatedCustomer = {
+                                  ...customer,
+                                  otp: otp
+                                };
+                                await saveCustomerToServer(updatedCustomer);
+                                alert(`Generated OTP for ${customer.name}: ${otp}\nPlease verify this code with the customer.`);
+                                const messageText = `Your Harino's verification OTP is ${otp}. Please enter this OTP in your Profile section to verify your account.`;
+                                const whatsappUrl = `https://wa.me/${normalizePhoneForWhatsApp(customer.phone)}?text=${encodeURIComponent(messageText)}`;
+                                window.open(whatsappUrl, '_blank');
+                              } catch (err) {
+                                console.error('Failed to save OTP to customer profile:', err);
+                                alert('Failed to generate and save OTP. Please try again.');
+                              }
+                            }}
+                            className="rounded-xl bg-green-700 hover:bg-green-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all active:scale-95"
+                          >
+                            Send OTP
+                          </button>
+                          <button
+                            onClick={() => verifyCustomer(customer)}
+                            className="rounded-xl bg-red-650 hover:bg-red-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all active:scale-95"
+                          >
+                            Verify Manually
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              {customers.filter((cust) => {
+                const query = walletSearchQuery.toLowerCase().trim();
+                return !query || cust.name.toLowerCase().includes(query) || cust.phone.includes(query);
+              }).length === 0 && (
+                <div className="text-sm text-slate-500">No matching customers found.</div>
+              )}
+            </div>
           </div>
 
           {/* Pending Top-ups Approval Section */}
@@ -741,26 +763,27 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
                     <div>
                       <button
                         onClick={async () => {
-                          const updatedTx: WalletTransaction = {
-                            ...tx,
-                            status: 'completed'
-                          };
-                          const customer = customers.find((c) => c.id === tx.customerId);
-                          if (!customer) {
-                            alert('Customer profile not found locally. Pulling live...');
-                            return;
-                          }
-                          const updatedCustomer = {
-                            ...customer,
-                            walletBalance: (customer.walletBalance ?? 0) + tx.amount
-                          };
                           try {
+                            const freshCustomers = await getServerCustomers();
+                            const customer = freshCustomers.find((c) => c.id === tx.customerId);
+                            if (!customer) {
+                              alert('Customer profile not found on server.');
+                              return;
+                            }
+                            const updatedTx: WalletTransaction = {
+                              ...tx,
+                              status: 'completed'
+                            };
+                            const updatedCustomer = {
+                              ...customer,
+                              walletBalance: (customer.walletBalance ?? 0) + tx.amount
+                            };
                             await saveWalletTransactionToServer(updatedTx);
                             await saveCustomerToServer(updatedCustomer);
                             alert(`Approved top-up of Rs ${tx.amount} for ${tx.customerName}`);
                             refresh();
-                          } catch (err) {
-                            alert('Failed to approve transaction.');
+                          } catch (err: any) {
+                            alert(err.message || 'Failed to approve transaction.');
                           }
                         }}
                         className="rounded-xl bg-green-700 hover:bg-green-600 text-white font-bold px-4 py-2 text-xs uppercase tracking-wider transition-all"
@@ -806,97 +829,99 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
                           </div>
                         </div>
                         
-                        {/* Ledger adjustments form */}
-                        <div className="mt-4 pt-4 border-t border-white/10 space-y-2">
-                          <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Adjust Balances</div>
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              placeholder="Amount (+/-)"
-                              id={`adj-wallet-${cust.id}`}
-                              className="w-1/2 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
-                            />
-                            <button
-                              onClick={async () => {
-                                const val = parseFloat((document.getElementById(`adj-wallet-${cust.id}`) as HTMLInputElement)?.value);
-                                if (isNaN(val) || val === 0) return;
-                                
-                                const updated = {
-                                  ...cust,
-                                  walletBalance: Math.max(0, (cust.walletBalance ?? 0) + val)
-                                };
-                                
-                                const tx: WalletTransaction = {
-                                  id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                                  customerId: cust.id,
-                                  customerName: cust.name,
-                                  customerPhone: cust.phone,
-                                  amount: val,
-                                  type: 'admin_adjustment',
-                                  status: 'completed',
-                                  createdAt: new Date().toISOString()
-                                };
-                                
-                                try {
-                                  await saveWalletTransactionToServer(tx);
-                                  await saveCustomerToServer(updated);
-                                  (document.getElementById(`adj-wallet-${cust.id}`) as HTMLInputElement).value = '';
-                                  refresh();
-                                  alert(`Wallet adjusted by Rs ${val}`);
-                                } catch (err) {
-                                  alert('Failed to adjust wallet.');
-                                }
-                              }}
-                              className="w-1/2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all"
-                            >
-                              Update Wallet
-                            </button>
+                        {/* Ledger adjustments form (Admin only) */}
+                        {session.role === 'admin' && (
+                          <div className="mt-4 pt-4 border-t border-white/10 space-y-2">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-550 mb-1">Adjust Balances</div>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                placeholder="Amount (+/-)"
+                                id={`adj-wallet-${cust.id}`}
+                                className="w-1/2 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                              />
+                              <button
+                                onClick={async () => {
+                                  const val = parseFloat((document.getElementById(`adj-wallet-${cust.id}`) as HTMLInputElement)?.value);
+                                  if (isNaN(val) || val === 0) return;
+                                  
+                                  const updated = {
+                                    ...cust,
+                                    walletBalance: Math.max(0, (cust.walletBalance ?? 0) + val)
+                                  };
+                                  
+                                  const tx: WalletTransaction = {
+                                    id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                                    customerId: cust.id,
+                                    customerName: cust.name,
+                                    customerPhone: cust.phone,
+                                    amount: val,
+                                    type: 'admin_adjustment',
+                                    status: 'completed',
+                                    createdAt: new Date().toISOString()
+                                  };
+                                  
+                                  try {
+                                    await saveWalletTransactionToServer(tx);
+                                    await saveCustomerToServer(updated);
+                                    (document.getElementById(`adj-wallet-${cust.id}`) as HTMLInputElement).value = '';
+                                    refresh();
+                                    alert(`Wallet adjusted by Rs ${val}`);
+                                  } catch (err) {
+                                    alert('Failed to adjust wallet.');
+                                  }
+                                }}
+                                className="w-1/2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all"
+                              >
+                                Update Wallet
+                              </button>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                placeholder="Points (+/-)"
+                                id={`adj-points-${cust.id}`}
+                                className="w-1/2 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+                              />
+                              <button
+                                onClick={async () => {
+                                  const val = parseInt((document.getElementById(`adj-points-${cust.id}`) as HTMLInputElement)?.value);
+                                  if (isNaN(val) || val === 0) return;
+                                  
+                                  const updated = {
+                                    ...cust,
+                                    rewardPoints: Math.max(0, (cust.rewardPoints ?? 0) + val)
+                                  };
+                                  
+                                  const tx: WalletTransaction = {
+                                    id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                                    customerId: cust.id,
+                                    customerName: cust.name,
+                                    customerPhone: cust.phone,
+                                    amount: val * 0.1, // 1 point = 0.1 Rs
+                                    type: 'admin_adjustment',
+                                    status: 'completed',
+                                    createdAt: new Date().toISOString()
+                                  };
+                                  
+                                  try {
+                                    await saveWalletTransactionToServer(tx);
+                                    await saveCustomerToServer(updated);
+                                    (document.getElementById(`adj-points-${cust.id}`) as HTMLInputElement).value = '';
+                                    refresh();
+                                    alert(`Points adjusted by ${val}`);
+                                  } catch (err) {
+                                    alert('Failed to adjust points.');
+                                  }
+                                }}
+                                className="w-1/2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all"
+                              >
+                                Update Points
+                              </button>
+                            </div>
                           </div>
-                          
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              placeholder="Points (+/-)"
-                              id={`adj-points-${cust.id}`}
-                              className="w-1/2 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
-                            />
-                            <button
-                              onClick={async () => {
-                                const val = parseInt((document.getElementById(`adj-points-${cust.id}`) as HTMLInputElement)?.value);
-                                if (isNaN(val) || val === 0) return;
-                                
-                                const updated = {
-                                  ...cust,
-                                  rewardPoints: Math.max(0, (cust.rewardPoints ?? 0) + val)
-                                };
-                                
-                                const tx: WalletTransaction = {
-                                  id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                                  customerId: cust.id,
-                                  customerName: cust.name,
-                                  customerPhone: cust.phone,
-                                  amount: val * 0.1, // 1 point = 0.1 Rs
-                                  type: 'admin_adjustment',
-                                  status: 'completed',
-                                  createdAt: new Date().toISOString()
-                                };
-                                
-                                try {
-                                  await saveWalletTransactionToServer(tx);
-                                  await saveCustomerToServer(updated);
-                                  (document.getElementById(`adj-points-${cust.id}`) as HTMLInputElement).value = '';
-                                  refresh();
-                                  alert(`Points adjusted by ${val}`);
-                                } catch (err) {
-                                  alert('Failed to adjust points.');
-                                }
-                              }}
-                              className="w-1/2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all"
-                            >
-                              Update Points
-                            </button>
-                          </div>
-                        </div>
+                        )}
                       </div>
                     );
                   })}
