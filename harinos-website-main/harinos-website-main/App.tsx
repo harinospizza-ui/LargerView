@@ -361,7 +361,7 @@ const App: React.FC = () => {
   });
   const ordersSwipeDismiss = useSwipeDismiss({
     direction: 'right',
-    
+
     onDismiss: () => handleAppBack(() => setView('menu')),
   });
   const activeOfferCards = useMemo(
@@ -403,7 +403,7 @@ const App: React.FC = () => {
       const now = new Date();
       const currentTimeInMins = now.getHours() * 60 + now.getMinutes();
       const openingTime = 11 * 60;
-      const closingTime = 20 * 60;
+      const closingTime = 21 * 60;
 
       if (currentTimeInMins < openingTime || currentTimeInMins >= closingTime) {
         setIsStoreOpen(false);
@@ -1067,7 +1067,7 @@ const App: React.FC = () => {
     // Deduct applied wallet amount and points from profile
     if (customerProfile) {
       const updatedProfile = { ...customerProfile };
-      
+
       if (useWallet && walletDiscount > 0) {
         updatedProfile.walletBalance = Math.max(0, (updatedProfile.walletBalance ?? 0) - walletDiscount);
         // Log transaction
@@ -1083,7 +1083,7 @@ const App: React.FC = () => {
         };
         void saveWalletTransactionToServer(tx).catch(console.error);
       }
-      
+
       if (usePoints && pointsDiscount > 0) {
         const pointsDeducted = Math.round(pointsDiscount * 10);
         updatedProfile.rewardPoints = Math.max(0, (updatedProfile.rewardPoints ?? 0) - pointsDeducted);
@@ -1100,7 +1100,7 @@ const App: React.FC = () => {
         };
         void saveWalletTransactionToServer(tx).catch(console.error);
       }
-      
+
       const pointsEarned = Math.floor(subtotal / 10);
       if (pointsEarned > 0) {
         updatedProfile.rewardPoints = (updatedProfile.rewardPoints ?? 0) + pointsEarned;
@@ -1117,7 +1117,7 @@ const App: React.FC = () => {
         };
         void saveWalletTransactionToServer(tx).catch(console.error);
       }
-      
+
       saveCustomerProfile(updatedProfile);
     }
 
@@ -1237,7 +1237,7 @@ const App: React.FC = () => {
                 <div className="rounded-3xl border border-red-200 bg-white/95 backdrop-blur-md p-6 shadow-xl relative overflow-hidden transition-all hover:shadow-2xl">
                   {/* Neon border decoration */}
                   <div className="absolute top-0 left-0 w-2 h-full bg-red-650 bg-red-600" />
-                  
+
                   <div className="flex justify-between items-start mb-4 pl-3">
                     <div>
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">Active Order Tracker</span>
@@ -1260,13 +1260,12 @@ const App: React.FC = () => {
 
                         return (
                           <div key={step} className="flex flex-col items-center z-10 relative">
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all ${
-                              isCurrent 
-                                ? 'bg-red-600 text-white ring-4 ring-red-100 scale-110 shadow-lg shadow-red-200' 
-                                : isCompleted 
-                                ? 'bg-emerald-500 text-white' 
-                                : 'bg-slate-100 text-slate-400 border border-slate-200'
-                            }`}>
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all ${isCurrent
+                                ? 'bg-red-600 text-white ring-4 ring-red-100 scale-110 shadow-lg shadow-red-200'
+                                : isCompleted
+                                  ? 'bg-emerald-500 text-white'
+                                  : 'bg-slate-100 text-slate-400 border border-slate-200'
+                              }`}>
                               {idx + 1}
                             </div>
                             <span className="text-[8px] font-bold uppercase tracking-wider text-slate-500 mt-1.5 whitespace-nowrap hidden sm:inline">
@@ -1301,11 +1300,10 @@ const App: React.FC = () => {
                     <button
                       key={category}
                       onClick={() => handleExploreCategory(category)}
-                      className={`snap-start whitespace-nowrap px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border shadow-sm flex-shrink-0 ${
-                        selectedCategory === category
+                      className={`snap-start whitespace-nowrap px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border shadow-sm flex-shrink-0 ${selectedCategory === category
                           ? 'bg-red-600 border-red-600 text-white scale-105 shadow-red-200'
                           : 'bg-white border-slate-100 text-slate-500 hover:text-red-600'
-                      }`}
+                        }`}
                     >
                       {category}
                     </button>
@@ -1462,7 +1460,7 @@ const App: React.FC = () => {
         onPaymentComplete={async () => {
           const amount = parseFloat(topUpAmount);
           if (isNaN(amount) || amount <= 0) return;
-          
+
           if (!customerProfile) return;
 
           // Log transaction as pending
@@ -1476,13 +1474,13 @@ const App: React.FC = () => {
             status: 'pending',
             createdAt: new Date().toISOString()
           };
-          
+
           try {
             await saveWalletTransactionToServer(tx);
             setIsWalletPaymentOpen(false);
             setIsWalletModalOpen(false);
             setTopUpAmount('');
-            
+
             showNotification({
               title: 'Top-up Request Submitted',
               message: `Your top-up of Rs ${amount.toFixed(2)} is pending. Your wallet will be updated within 24h.`,
@@ -1513,7 +1511,7 @@ const App: React.FC = () => {
           <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-xl" onClick={() => setIsWalletModalOpen(false)} />
           <div className="relative w-full max-w-sm rounded-t-[2.5rem] bg-white p-6 text-slate-900 shadow-2xl sm:rounded-[3rem] animate-slide-up max-h-[90vh] overflow-y-auto hide-scrollbar">
             <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200 sm:hidden" />
-            
+
             <div className="flex justify-between items-center mb-6">
               <div>
                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Harino's Customer Profile</span>
@@ -1612,12 +1610,12 @@ const App: React.FC = () => {
                         });
                         return;
                       }
-                      
+
                       try {
                         // Fetch fresh data from server to check the OTP
                         const remoteCustomers = await getServerCustomers();
                         const freshProfile = remoteCustomers.find((c) => c.id === customerProfile.id);
-                        
+
                         if (!freshProfile) {
                           showNotification({
                             title: 'Error',
@@ -1641,7 +1639,7 @@ const App: React.FC = () => {
                           const result = await verifyServerCustomer(customerProfile.id);
                           if (result) {
                             StorageService.markCustomerVerified(customerProfile.id);
-                            
+
                             // Merge locally
                             const updatedLocalProfile = {
                               ...customerProfile,
@@ -1651,13 +1649,13 @@ const App: React.FC = () => {
                             };
                             StorageService.saveCustomerProfile(updatedLocalProfile);
                             setCustomerProfile(updatedLocalProfile);
-                            
+
                             showNotification({
                               title: 'Account Verified!',
                               message: `Your profile is verified. Your referral code is ${result.referralCode ?? ''}`,
                               type: 'success'
                             });
-                            
+
                             setInputOtp('');
                           } else {
                             throw new Error('Verification returned no customer data.');
@@ -1708,7 +1706,7 @@ const App: React.FC = () => {
                         alert('Please enter a referral code.');
                         return;
                       }
-                      
+
                       if (code === customerProfile.referralCode) {
                         alert('You cannot use your own referral code.');
                         return;
@@ -1843,7 +1841,7 @@ const App: React.FC = () => {
             {/* Share options dropdown/grid */}
             <div className="mt-6 pt-5 border-t border-slate-100">
               <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 text-center">Share & Earn 100 Pts</div>
-              
+
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <button
                   type="button"
@@ -1880,7 +1878,7 @@ const App: React.FC = () => {
                   className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-150 hover:border-red-200 hover:bg-red-50/20 active:scale-95 transition-all text-center cursor-pointer shadow-sm"
                 >
                   <svg className="w-6 h-6 text-[#25D366] mb-1.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.42 9.864-9.858.002-2.634-1.025-5.11-2.893-6.98-1.869-1.868-4.35-2.897-6.98-2.898-5.44 0-9.866 4.425-9.87 9.863-.001 1.638.428 3.236 1.243 4.646L1.879 22.148l4.768-1.251zM18.06 14.9c-.33-.164-1.95-.96-2.25-1.07-.3-.11-.52-.164-.74.164-.22.33-.85 1.07-1.04 1.28-.19.22-.385.247-.715.082-1.815-.91-2.91-1.485-4.08-3.485-.31-.53.31-.49.89-1.64.09-.19.045-.355-.022-.52-.067-.164-.6-.145-1.05-1.07-.22-.45-.48-.39-.655-.4-.165-.01-.355-.01-.545-.01-.19 0-.5.07-.76.355-.26.285-1 1-1 2.44 0 1.44 1.05 2.84 1.2 3.03.15.19 2.07 3.16 5 4.39 2.45 1.03 2.95.83 3.48.78.53-.05 1.7-.69 1.94-1.365.24-.67.24-1.24.17-1.365-.07-.12-.27-.19-.6-.355z"/>
+                    <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.42 9.864-9.858.002-2.634-1.025-5.11-2.893-6.98-1.869-1.868-4.35-2.897-6.98-2.898-5.44 0-9.866 4.425-9.87 9.863-.001 1.638.428 3.236 1.243 4.646L1.879 22.148l4.768-1.251zM18.06 14.9c-.33-.164-1.95-.96-2.25-1.07-.3-.11-.52-.164-.74.164-.22.33-.85 1.07-1.04 1.28-.19.22-.385.247-.715.082-1.815-.91-2.91-1.485-4.08-3.485-.31-.53.31-.49.89-1.64.09-.19.045-.355-.022-.52-.067-.164-.6-.145-1.05-1.07-.22-.45-.48-.39-.655-.4-.165-.01-.355-.01-.545-.01-.19 0-.5.07-.76.355-.26.285-1 1-1 2.44 0 1.44 1.05 2.84 1.2 3.03.15.19 2.07 3.16 5 4.39 2.45 1.03 2.95.83 3.48.78.53-.05 1.7-.69 1.94-1.365.24-.67.24-1.24.17-1.365-.07-.12-.27-.19-.6-.355z" />
                   </svg>
                   <span className="text-[9px] font-bold tracking-tight text-slate-700">WhatsApp</span>
                 </button>
@@ -1899,7 +1897,7 @@ const App: React.FC = () => {
                   className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-150 hover:border-red-200 hover:bg-red-50/20 active:scale-95 transition-all text-center cursor-pointer shadow-sm"
                 >
                   <svg className="w-6 h-6 text-[#0088cc] mb-1.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M11.944 0C5.344 0 0 5.344 0 12s5.344 12 11.944 12c6.6 0 11.944-5.344 11.944-12S18.544 0 11.944 0zM17.5 8.16l-1.93 9.09c-.14.65-.53.81-1.08.5l-2.95-2.17-1.42 1.37c-.16.16-.29.29-.59.29l.21-3.01 5.48-4.95c.24-.22-.05-.34-.37-.13l-6.78 4.27-2.92-.91c-.63-.2-.64-.63.13-.93l11.39-4.39c.53-.19.99.13.81 1.04z"/>
+                    <path d="M11.944 0C5.344 0 0 5.344 0 12s5.344 12 11.944 12c6.6 0 11.944-5.344 11.944-12S18.544 0 11.944 0zM17.5 8.16l-1.93 9.09c-.14.65-.53.81-1.08.5l-2.95-2.17-1.42 1.37c-.16.16-.29.29-.59.29l.21-3.01 5.48-4.95c.24-.22-.05-.34-.37-.13l-6.78 4.27-2.92-.91c-.63-.2-.64-.63.13-.93l11.39-4.39c.53-.19.99.13.81 1.04z" />
                   </svg>
                   <span className="text-[9px] font-bold tracking-tight text-slate-700">Telegram</span>
                 </button>
@@ -1918,7 +1916,7 @@ const App: React.FC = () => {
                   className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-150 hover:border-red-200 hover:bg-red-50/20 active:scale-95 transition-all text-center cursor-pointer shadow-sm"
                 >
                   <svg className="w-6 h-6 text-black mb-1.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                   </svg>
                   <span className="text-[9px] font-bold tracking-tight text-slate-700">Twitter/X</span>
                 </button>
@@ -1940,7 +1938,7 @@ const App: React.FC = () => {
                   className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-150 hover:border-red-200 hover:bg-red-50/20 active:scale-95 transition-all text-center cursor-pointer shadow-sm"
                 >
                   <svg className="w-6 h-6 text-[#E1306C] mb-1.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/>
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
                   </svg>
                   <span className="text-[9px] font-bold tracking-tight text-slate-700">Instagram</span>
                 </button>
@@ -1959,7 +1957,7 @@ const App: React.FC = () => {
                   className="flex flex-col items-center p-3 rounded-2xl bg-white border border-slate-150 hover:border-red-200 hover:bg-red-50/20 active:scale-95 transition-all text-center cursor-pointer shadow-sm"
                 >
                   <svg className="w-6 h-6 text-[#1877F2] mb-1.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
                   </svg>
                   <span className="text-[9px] font-bold tracking-tight text-slate-700">Facebook</span>
                 </button>
