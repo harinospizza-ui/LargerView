@@ -32,5 +32,21 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if request.resource.data.id == transactionId;
     }
+
+    match /menu_items/{itemId} {
+      allow read, write: if true;
+    }
+
+    match /outlets/{outletId} {
+      allow read, write: if true;
+    }
+
+    match /offers/{offerId} {
+      allow read, write: if true;
+    }
+
+    match /staff_users/{username} {
+      allow read, write: if true;
+    }
   }
 }

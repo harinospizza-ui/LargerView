@@ -327,6 +327,121 @@ const saveLocalDb = (data: any) => {
   }
 };
 
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'harinos-12902';
+const REST_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+
+let isUsingRestDb = false;
+
+const getValue = (valObj: any): any => {
+  if (!valObj) return null;
+  if ('stringValue' in valObj) return valObj.stringValue;
+  if ('integerValue' in valObj) return parseInt(valObj.integerValue, 10);
+  if ('doubleValue' in valObj) return parseFloat(valObj.doubleValue);
+  if ('booleanValue' in valObj) return valObj.booleanValue;
+  if ('nullValue' in valObj) return null;
+  if ('arrayValue' in valObj) {
+    const values = valObj.arrayValue.values || [];
+    return values.map((v: any) => getValue(v));
+  }
+  if ('mapValue' in valObj) {
+    const fields = valObj.mapValue.fields || {};
+    const result: any = {};
+    for (const [k, v] of Object.entries(fields)) {
+      result[k] = getValue(v);
+    }
+    return result;
+  }
+  return undefined;
+};
+
+const mapFromFirestore = (doc: any): any => {
+  if (!doc || !doc.fields) return null;
+  const result: any = {};
+  for (const [key, value] of Object.entries(doc.fields)) {
+    result[key] = getValue(value);
+  }
+  if (doc.name) {
+    const parts = doc.name.split('/');
+    result.id = parts[parts.length - 1];
+  }
+  return result;
+};
+
+const toValue = (val: any): any => {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'string') return { stringValue: val };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) {
+      return { integerValue: val.toString() };
+    }
+    return { doubleValue: val };
+  }
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(v => toValue(v)).filter(v => v !== undefined) } };
+  }
+  if (typeof val === 'object') {
+    const fields: any = {};
+    for (const [k, v] of Object.entries(val)) {
+      const fieldVal = toValue(v);
+      if (fieldVal !== undefined) {
+        fields[k] = fieldVal;
+      }
+    }
+    return { mapValue: { fields } };
+  }
+  return undefined;
+};
+
+const mapToFirestore = (obj: any): any => {
+  const fields: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === 'id') continue;
+    const val = toValue(value);
+    if (val !== undefined) {
+      fields[key] = val;
+    }
+  }
+  return { fields };
+};
+
+const restGetCollection = async (collectionId: string): Promise<any[]> => {
+  const url = `${REST_BASE}/${collectionId}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    if (res.status === 404) return [];
+    throw new Error(`REST fetch collection failed with status ${res.status}`);
+  }
+  const data = await res.json();
+  const docs = data.documents || [];
+  return docs.map((d: any) => mapFromFirestore(d)).filter((d: any) => d !== null);
+};
+
+const restGetDocument = async (collectionId: string, documentId: string): Promise<any | null> => {
+  const url = `${REST_BASE}/${collectionId}/${encodeURIComponent(documentId)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error(`REST fetch document failed with status ${res.status}`);
+  }
+  const data = await res.json();
+  return mapFromFirestore(data);
+};
+
+const restSetDocument = async (collectionId: string, documentId: string, data: any): Promise<void> => {
+  const url = `${REST_BASE}/${collectionId}/${encodeURIComponent(documentId)}`;
+  const firestoreData = mapToFirestore(data);
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(firestoreData),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`REST set document failed with status ${res.status}: ${errText}`);
+  }
+};
+
 const getFirestore = (): admin.firestore.Firestore | null => {
   try {
     if (!admin.apps.length) {
@@ -338,8 +453,8 @@ const getFirestore = (): admin.firestore.Firestore | null => {
     }
     return admin.firestore();
   } catch (error) {
-    console.warn('Firebase admin initialization failed, falling back to local DB:', error);
-    isUsingMemoryDb = true;
+    console.warn('Firebase admin initialization failed, falling back to REST/local DB:', error);
+    isUsingRestDb = true;
     return null;
   }
 };
@@ -380,11 +495,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (req.method === 'GET' && path === '/firebase-config') {
+      res.json({
+        success: true,
+        config: {
+          apiKey: (process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || '').trim(),
+          authDomain: (process.env.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN || '').trim(),
+          projectId: (process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '').trim(),
+          storageBucket: (process.env.VITE_FIREBASE_STORAGE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET || '').trim(),
+          messagingSenderId: (process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || process.env.FIREBASE_MESSAGING_SENDER_ID || '').trim(),
+          appId: (process.env.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID || '').trim(),
+        }
+      });
+      return;
+    }
+
     if (req.method === 'POST' && path === '/auth/login') {
       const { username, password } = req.body as { username?: string; password?: string };
       if (!username || !password) {
         res.status(400).json({ success: false, message: 'Missing username or password.' });
         return;
+      }
+
+      if (isUsingRestDb) {
+        try {
+          let users = await restGetCollection('staff_users');
+          if (users.length === 0) {
+            for (const user of DEFAULT_STAFF) {
+              await restSetDocument('staff_users', user.username, user);
+            }
+            users = [...DEFAULT_STAFF];
+          }
+          const user = users.find((u: any) => u.username === username);
+          if (!user || user.password !== password) {
+            res.status(401).json({ success: false, message: 'Invalid username or password.' });
+            return;
+          }
+          res.json({
+            success: true,
+            user: { role: user.role, username: user.username, outletId: user.outletId },
+          });
+          return;
+        } catch (err) {
+          console.warn('REST auth login failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
       }
       
       if (isUsingMemoryDb) {
@@ -443,6 +599,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ success: false, message: 'Missing username or new password.' });
         return;
       }
+
+      if (isUsingRestDb) {
+        try {
+          const user = await restGetDocument('staff_users', username);
+          if (!user) {
+            res.status(404).json({ success: false, message: 'Staff user not found.' });
+            return;
+          }
+          user.password = newPassword;
+          await restSetDocument('staff_users', username, user);
+          res.json({ success: true, message: 'Password updated successfully.' });
+          return;
+        } catch (err) {
+          console.warn('REST change password failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -470,6 +644,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET' && path === '/menu-items') {
+      if (isUsingRestDb) {
+        try {
+          const items = await restGetCollection('menu_items');
+          res.json({ success: true, menuItems: items });
+          return;
+        } catch (err) {
+          console.warn('REST get menu items failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         res.json({ success: true, menuItems: localDb.menu_items });
@@ -483,6 +669,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/menu-items') {
       const item = req.body as MenuItem;
+
+      if (isUsingRestDb) {
+        try {
+          await restSetDocument('menu_items', item.id, item);
+          res.json({ success: true });
+          return;
+        } catch (err) {
+          console.warn('REST save menu item failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -501,6 +699,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/menu-items/seed') {
       const items = req.body as MenuItem[];
+
+      if (isUsingRestDb) {
+        try {
+          for (const item of items) {
+            await restSetDocument('menu_items', item.id, item);
+          }
+          res.json({ success: true, count: items.length });
+          return;
+        } catch (err) {
+          console.warn('REST seed menu items failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -525,6 +737,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET' && path === '/wallet/transactions') {
+      if (isUsingRestDb) {
+        try {
+          const txs = await restGetCollection('wallet_transactions');
+          const sorted = txs.sort(
+            (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+          res.json({ success: true, transactions: sorted });
+          return;
+        } catch (err) {
+          console.warn('REST get transactions failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         const sorted = [...localDb.wallet_transactions].sort(
@@ -541,6 +768,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/wallet/transactions') {
       const transaction = req.body as WalletTransaction;
+
+      if (isUsingRestDb) {
+        try {
+          await restSetDocument('wallet_transactions', transaction.id, transaction);
+          res.json({ success: true });
+          return;
+        } catch (err) {
+          console.warn('REST save transaction failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -558,6 +797,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET' && path === '/outlets') {
+      if (isUsingRestDb) {
+        try {
+          const outlets = await restGetCollection('outlets');
+          res.json({ success: true, outlets });
+          return;
+        } catch (err) {
+          console.warn('REST get outlets failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         res.json({ success: true, outlets: localDb.outlets });
@@ -571,6 +822,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/outlets') {
       const outlet = req.body as OutletConfig;
+
+      if (isUsingRestDb) {
+        try {
+          await restSetDocument('outlets', outlet.id, outlet);
+          res.json({ success: true });
+          return;
+        } catch (err) {
+          console.warn('REST save outlet failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -589,6 +852,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/outlets/seed') {
       const outlets = req.body as OutletConfig[];
+
+      if (isUsingRestDb) {
+        try {
+          for (const outlet of outlets) {
+            await restSetDocument('outlets', outlet.id, outlet);
+          }
+          res.json({ success: true, count: outlets.length });
+          return;
+        } catch (err) {
+          console.warn('REST seed outlets failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -613,6 +890,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET' && path === '/offers') {
+      if (isUsingRestDb) {
+        try {
+          const offers = await restGetCollection('offers');
+          res.json({ success: true, offers });
+          return;
+        } catch (err) {
+          console.warn('REST get offers failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         res.json({ success: true, offers: localDb.offers });
@@ -626,6 +915,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/offers') {
       const offer = req.body as OfferCard;
+
+      if (isUsingRestDb) {
+        try {
+          await restSetDocument('offers', offer.id, offer);
+          res.json({ success: true });
+          return;
+        } catch (err) {
+          console.warn('REST save offer failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -644,6 +945,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/offers/seed') {
       const offers = req.body as OfferCard[];
+
+      if (isUsingRestDb) {
+        try {
+          for (const offer of offers) {
+            await restSetDocument('offers', offer.id, offer);
+          }
+          res.json({ success: true, count: offers.length });
+          return;
+        } catch (err) {
+          console.warn('REST seed offers failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -668,6 +983,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET' && path === '/orders') {
+      if (isUsingRestDb) {
+        try {
+          const orders = await restGetCollection('orders');
+          const sorted = orders.sort(
+            (a: any, b: any) => new Date(b.receivedAt ?? b.date).getTime() - new Date(a.receivedAt ?? a.date).getTime()
+          );
+          res.json({ success: true, orders: sorted });
+          return;
+        } catch (err) {
+          console.warn('REST get orders failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         const sorted = [...localDb.orders].sort(
@@ -695,6 +1025,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         status: order.status ?? 'new',
       };
 
+      if (isUsingRestDb) {
+        try {
+          await restSetDocument('orders', nextOrder.id, nextOrder);
+          res.status(201).json({ success: true, orderId: nextOrder.id });
+          return;
+        } catch (err) {
+          console.warn('REST save order failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         const idx = localDb.orders.findIndex((o: any) => o.id === nextOrder.id);
@@ -718,6 +1060,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       const orderId = decodeURIComponent(statusMatch[1]);
+
+      if (isUsingRestDb) {
+        try {
+          const order = await restGetDocument('orders', orderId);
+          if (order) {
+            order.status = status;
+            order.statusUpdatedAt = new Date().toISOString();
+            await restSetDocument('orders', orderId, order);
+            res.json({ success: true });
+            return;
+          }
+          res.status(404).json({ success: false, message: 'Order not found.' });
+          return;
+        } catch (err) {
+          console.warn('REST update order status failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
@@ -745,6 +1106,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'GET' && path === '/customers') {
+      if (isUsingRestDb) {
+        try {
+          const customers = await restGetCollection('customers');
+          const sorted = customers.sort((a: any, b: any) => {
+            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return timeB - timeA;
+          });
+          res.json({ success: true, customers: sorted });
+          return;
+        } catch (err) {
+          console.warn('REST get customers failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         const sorted = [...localDb.customers].sort((a: any, b: any) => {
@@ -774,6 +1152,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
+      if (isUsingRestDb) {
+        try {
+          await restSetDocument('customers', profile.id, profile);
+          res.status(201).json({ success: true, customer: profile });
+          return;
+        } catch (err) {
+          console.warn('REST save customer failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
         const idx = localDb.customers.findIndex((c: any) => c.id === profile.id);
@@ -792,6 +1182,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const verifyMatch = path.match(/^\/customers\/([^/]+)\/verify$/);
     if (req.method === 'PATCH' && verifyMatch) {
       const customerId = decodeURIComponent(verifyMatch[1]);
+
+      if (isUsingRestDb) {
+        try {
+          const customerData = await restGetDocument('customers', customerId);
+          if (!customerData) {
+            res.status(404).json({ success: false, message: 'Customer not found.' });
+            return;
+          }
+          
+          const customers = await restGetCollection('customers');
+          const cleanPhone = (p: string) => p.replace(/\D/g, '');
+          const targetPhone = cleanPhone(customerData.phone);
+          const alreadyVerified = customers.some((c: any) => {
+            return c.verified && c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone;
+          });
+
+          if (alreadyVerified) {
+            res.status(400).json({ success: false, message: 'This phone number is already verified under another profile.' });
+            return;
+          }
+
+          const generateReferralCode = () => {
+            return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+          };
+          const referralCode = customerData.referralCode ?? generateReferralCode();
+
+          const customer = { ...customerData, verified: true, referralCode };
+          await restSetDocument('customers', customerId, customer);
+          res.json({ success: true, customer });
+          return;
+        } catch (err) {
+          console.warn('REST verify customer failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
