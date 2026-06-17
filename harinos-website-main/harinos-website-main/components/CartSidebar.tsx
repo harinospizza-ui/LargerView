@@ -1,5 +1,5 @@
 import React from 'react';
-import { CustomerLocation, Order, OrderType, OutletConfig, PricedCartItem } from '../types';
+import { CustomerLocation, Order, OrderType, OutletConfig, PricedCartItem, CustomerProfile } from '../types';
 import { DeliveryPricingSummary } from '../deliveryPricing';
 import { useSwipeDismiss } from '../hooks/useSwipeDismiss';
 import { getCartItemId } from '../offerUtils';
@@ -24,6 +24,13 @@ interface CartSidebarProps {
   onDetectLocation: () => Promise<CustomerLocation | null>;
   pastOrders?: Order[];
   onReorder?: (order: Order) => void;
+  customerProfile: CustomerProfile | null;
+  useWallet: boolean;
+  setUseWallet: (use: boolean) => void;
+  usePoints: boolean;
+  setUsePoints: (use: boolean) => void;
+  walletDiscount: number;
+  pointsDiscount: number;
 }
 
 const CartSidebar: React.FC<CartSidebarProps> = ({
@@ -46,11 +53,19 @@ const CartSidebar: React.FC<CartSidebarProps> = ({
   onDetectLocation,
   pastOrders = [],
   onReorder,
+  customerProfile,
+  useWallet,
+  setUseWallet,
+  usePoints,
+  setUsePoints,
+  walletDiscount,
+  pointsDiscount,
 }) => {
-  const isDeliveryImpossible = orderType === 'delivery' && deliveryFee === -1;
+  const isDeliveryLocationMissing = orderType === 'delivery' && customerLocation === null;
+  const isDeliveryImpossible = orderType === 'delivery' && (deliveryFee === -1 || isDeliveryLocationMissing);
   const isDeliveryRoutePending = orderType === 'delivery' && outletDistanceKm === null;
   const effectiveDeliveryFee = orderType === 'delivery' && deliveryFee > 0 ? deliveryFee : 0;
-  const finalTotal = total + effectiveDeliveryFee;
+  const finalTotal = Math.max(0, total + effectiveDeliveryFee - walletDiscount - pointsDiscount);
   const includedGst = total - total / 1.05;
   const lastOrder = pastOrders.length > 0 ? pastOrders[0] : null;
   const outletForDisplay = orderType === 'delivery' ? nearestOutlet : selectedOutlet;
@@ -392,6 +407,55 @@ const CartSidebar: React.FC<CartSidebarProps> = ({
 
           {items.length > 0 && (
             <div className="shrink-0 bg-slate-900 p-4 text-white shadow-2xl sm:rounded-t-[2.5rem] sm:p-6">
+              {/* Wallet and Points Discounts Section */}
+              {customerProfile && (
+                <div className="mb-4 bg-white/5 border border-white/10 rounded-2xl p-3 space-y-2">
+                  <div className="text-[9px] font-black uppercase tracking-widest text-orange-400">
+                    Wallet & Rewards Discount
+                  </div>
+                  
+                  {/* Wallet Checkbox */}
+                  {(customerProfile.walletBalance ?? 0) > 0 && (
+                    <label className="flex items-center justify-between text-xs font-bold cursor-pointer group select-none">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={useWallet}
+                          onChange={(e) => setUseWallet(e.target.checked)}
+                          className="w-4 h-4 rounded border-white/20 bg-transparent text-red-600 focus:ring-0 focus:ring-offset-0"
+                        />
+                        <span className="text-white/95">Use Wallet (Rs {(customerProfile.walletBalance ?? 0).toFixed(0)})</span>
+                      </div>
+                      {useWallet && (
+                        <span className="font-mono text-[10px] text-green-400 font-black">-Rs {walletDiscount.toFixed(0)}</span>
+                      )}
+                    </label>
+                  )}
+
+                  {/* Points Checkbox */}
+                  {(customerProfile.rewardPoints ?? 0) > 0 && (
+                    <label className="flex items-center justify-between text-xs font-bold cursor-pointer group select-none">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={usePoints}
+                          onChange={(e) => setUsePoints(e.target.checked)}
+                          className="w-4 h-4 rounded border-white/20 bg-transparent text-red-600 focus:ring-0 focus:ring-offset-0"
+                        />
+                        <span className="text-white/95">Use Points ({customerProfile.rewardPoints} pts = Rs {(customerProfile.rewardPoints * 0.1).toFixed(0)})</span>
+                      </div>
+                      {usePoints && (
+                        <span className="font-mono text-[10px] text-green-400 font-black">-Rs {pointsDiscount.toFixed(0)}</span>
+                      )}
+                    </label>
+                  )}
+                  
+                  {((customerProfile.walletBalance ?? 0) === 0 && (customerProfile.rewardPoints ?? 0) === 0) && (
+                    <div className="text-[10px] text-white/40">No wallet balance or reward points available.</div>
+                  )}
+                </div>
+              )}
+
               <div className="mb-5 space-y-2 font-mono text-[10px] uppercase tracking-widest opacity-80">
                 <div className="flex justify-between"><span>Subtotal</span><span>Rs {total.toFixed(2)}</span></div>
                 {orderType === 'delivery' && (
@@ -414,6 +478,18 @@ const CartSidebar: React.FC<CartSidebarProps> = ({
                   </div>
                 )}
                 <div className="flex justify-between"><span>GST Included</span><span>Rs {includedGst.toFixed(2)}</span></div>
+                {walletDiscount > 0 && (
+                  <div className="flex justify-between text-green-400 font-black">
+                    <span>Wallet Applied</span>
+                    <span>-Rs {walletDiscount.toFixed(2)}</span>
+                  </div>
+                )}
+                {pointsDiscount > 0 && (
+                  <div className="flex justify-between text-green-400 font-black">
+                    <span>Points Applied</span>
+                    <span>-Rs {pointsDiscount.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="my-2 h-px border-t border-dashed border-white/20" />
                 <div className="flex justify-between text-xl font-display font-bold text-white">
                   <span>Grand Total</span>
@@ -429,7 +505,13 @@ const CartSidebar: React.FC<CartSidebarProps> = ({
                     : 'bg-red-600 text-white active:scale-95'
                 }`}
               >
-                <span>{isDeliveryImpossible ? 'Beyond Service Area' : 'Pay via UPI'}</span>
+                <span>
+                  {orderType === 'delivery' && customerLocation === null
+                    ? 'Location Required'
+                    : deliveryFee === -1 && orderType === 'delivery'
+                    ? 'Beyond Service Area'
+                    : 'Pay via UPI'}
+                </span>
                 {!isDeliveryImpossible && (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14 5l7 7m0 0l-7 7m7-7H3" />

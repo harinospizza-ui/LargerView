@@ -96,7 +96,7 @@ router.get('/tokens/:userId', async (req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const tokens = await getUserTokens(userId);
+    const tokens = await getUserTokens(userId as string);
 
     res.json({
       success: true,
@@ -124,7 +124,7 @@ router.delete('/tokens/:userId/:fcmToken', async (req: Request, res: Response, n
       return;
     }
 
-    await deleteDeviceToken(userId, fcmToken);
+    await deleteDeviceToken(userId as string, fcmToken as string);
 
     res.json({
       success: true,

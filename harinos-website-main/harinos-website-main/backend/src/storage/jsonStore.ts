@@ -1,12 +1,18 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
-import { CustomerProfile, FullOrderPayload, OrderStatus } from '../types.js';
+import { CustomerProfile, FullOrderPayload, OrderStatus, MenuItem, OutletConfig, OfferCard, AdminUser, WalletTransaction } from '../types.js';
 import { OrderStore, newestOrdersFirst } from './store.js';
 
 const dataRoot = path.resolve(config.fileStore.rootPath);
 const ordersFile = path.join(dataRoot, 'orders.json');
 const customersFile = path.join(dataRoot, 'customers.json');
+const menuItemsFile = path.join(dataRoot, 'menu_items.json');
+const outletsFile = path.join(dataRoot, 'outlets.json');
+const offersFile = path.join(dataRoot, 'offers.json');
+const staffUsersFile = path.join(dataRoot, 'staff_users.json');
+const walletTransactionsFile = path.join(dataRoot, 'wallet_transactions.json');
+
 
 const readJson = async <T,>(filePath: string, fallback: T): Promise<T> => {
   try {
@@ -48,13 +54,73 @@ export const saveStoredCustomer = async (profile: CustomerProfile): Promise<void
 
 export const verifyStoredCustomer = async (customerId: string): Promise<CustomerProfile | null> => {
   let updatedCustomer: CustomerProfile | null = null;
-  const customers = (await getStoredCustomers()).map((customer) => {
+  const allCustomers = await getStoredCustomers();
+  const targetCustomer = allCustomers.find((c) => c.id === customerId);
+  if (!targetCustomer) return null;
+
+  const cleanPhone = (p: string) => p.replace(/\D/g, '');
+  const targetPhone = cleanPhone(targetCustomer.phone);
+  
+  const alreadyVerified = allCustomers.some(
+    (c) => c.verified && c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone
+  );
+
+  if (alreadyVerified) {
+    throw new Error('This phone number is already verified under another profile.');
+  }
+
+  const generateReferralCode = () => {
+    return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+  };
+  const referralCode = targetCustomer.referralCode ?? generateReferralCode();
+
+  const customers = allCustomers.map((customer) => {
     if (customer.id !== customerId) return customer;
-    updatedCustomer = { ...customer, verified: true };
+    updatedCustomer = { ...customer, verified: true, referralCode };
     return updatedCustomer;
   });
   await writeJson(customersFile, customers);
   return updatedCustomer;
+};
+
+export const getStoredMenuItems = async (): Promise<MenuItem[]> =>
+  readJson<MenuItem[]>(menuItemsFile, []);
+
+export const saveStoredMenuItem = async (item: MenuItem): Promise<void> => {
+  const items = (await getStoredMenuItems()).filter((existing) => existing.id !== item.id);
+  await writeJson(menuItemsFile, [...items, item]);
+};
+
+export const getStoredOutlets = async (): Promise<OutletConfig[]> =>
+  readJson<OutletConfig[]>(outletsFile, []);
+
+export const saveStoredOutlet = async (outlet: OutletConfig): Promise<void> => {
+  const outlets = (await getStoredOutlets()).filter((existing) => existing.id !== outlet.id);
+  await writeJson(outletsFile, [...outlets, outlet]);
+};
+
+export const getStoredOffers = async (): Promise<OfferCard[]> =>
+  readJson<OfferCard[]>(offersFile, []);
+
+export const saveStoredOffer = async (offer: OfferCard): Promise<void> => {
+  const offers = (await getStoredOffers()).filter((existing) => existing.id !== offer.id);
+  await writeJson(offersFile, [...offers, offer]);
+};
+
+export const getStoredStaffUsers = async (): Promise<AdminUser[]> =>
+  readJson<AdminUser[]>(staffUsersFile, []);
+
+export const saveStoredStaffUser = async (user: AdminUser): Promise<void> => {
+  const users = (await getStoredStaffUsers()).filter((existing) => existing.username !== user.username);
+  await writeJson(staffUsersFile, [...users, user]);
+};
+
+export const getStoredWalletTransactions = async (): Promise<WalletTransaction[]> =>
+  readJson<WalletTransaction[]>(walletTransactionsFile, []);
+
+export const saveStoredWalletTransaction = async (transaction: WalletTransaction): Promise<void> => {
+  const transactions = (await getStoredWalletTransactions()).filter((existing) => existing.id !== transaction.id);
+  await writeJson(walletTransactionsFile, [transaction, ...transactions]);
 };
 
 export const jsonStore: OrderStore = {
@@ -65,4 +131,15 @@ export const jsonStore: OrderStore = {
   getCustomers: getStoredCustomers,
   saveCustomer: saveStoredCustomer,
   verifyCustomer: verifyStoredCustomer,
+  getMenuItems: getStoredMenuItems,
+  saveMenuItem: saveStoredMenuItem,
+  getOutlets: getStoredOutlets,
+  saveOutlet: saveStoredOutlet,
+  getOffers: getStoredOffers,
+  saveOffer: saveStoredOffer,
+  getStaffUsers: getStoredStaffUsers,
+  saveStaffUser: saveStoredStaffUser,
+  getWalletTransactions: getStoredWalletTransactions,
+  saveWalletTransaction: saveStoredWalletTransaction,
 };
+

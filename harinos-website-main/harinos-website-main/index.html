@@ -162,6 +162,64 @@
       .cta-glow {
         animation: cta-glow 2.2s ease-in-out infinite;
       }
+
+      /* Premium UI Elements & Micro-animations */
+      .glass-card {
+        background: rgba(255, 255, 255, 0.035);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .glass-card-hover {
+        transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .glass-card-hover:hover {
+        transform: translateY(-4px) scale(1.008);
+        background: rgba(255, 255, 255, 0.085);
+        border-color: rgba(255, 255, 255, 0.18);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+      }
+
+      .text-glow {
+        text-shadow: 0 0 16px rgba(196, 55, 27, 0.6);
+      }
+
+      .bg-gradient-premium {
+        background: linear-gradient(135deg, #d33c20 0%, #8c1a08 100%);
+      }
+
+      .transition-premium {
+        transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .btn-hover-scale {
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .btn-hover-scale:hover {
+        transform: scale(1.03);
+      }
+
+      .btn-hover-scale:active {
+        transform: scale(0.96);
+      }
+
+      @keyframes slide-in-up {
+        from {
+          transform: translateY(16px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      .animate-slide-up {
+        animation: slide-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
     </style>
   </head>
   <body>

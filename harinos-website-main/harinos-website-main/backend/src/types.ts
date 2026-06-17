@@ -41,6 +41,25 @@ export interface CustomerProfile {
   email?: string;
   loginMethod: 'email' | 'phone';
   verified?: boolean;
+  avatar?: string;
+  referralCode?: string;
+  referredBy?: string;
+  referralAttempts?: number;
+  referralApplied?: boolean;
+  otp?: string;
+  createdAt: string;
+  walletBalance?: number;
+  rewardPoints?: number;
+}
+
+export interface WalletTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  amount: number;
+  type: 'topup' | 'reward' | 'debit' | 'credit' | 'admin_adjustment';
+  status: 'pending' | 'completed' | 'failed';
   createdAt: string;
 }
 
@@ -62,4 +81,64 @@ export interface FullOrderPayload {
   customerEmail?: string;
   receivedAt?: string;
   status?: OrderStatus;
+  walletAmountRedeemed?: number;
+  rewardPointsRedeemed?: number;
+  rewardPointsEarned?: number;
 }
+
+export type AdminRole = 'admin' | 'manager' | 'staff';
+
+export interface AdminUser {
+  role: AdminRole;
+  username: string;
+  password: string;
+  outletId: string | null;
+}
+
+export interface SizeOption {
+  label: string;
+  price: number;
+}
+
+export interface MenuItem {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  image: string;
+  popular?: boolean;
+  spicy?: boolean;
+  vegetarian: boolean;
+  available: boolean;
+  sizes?: SizeOption[];
+}
+
+export interface OfferCard {
+  id: string;
+  enabled: boolean;
+  image: string;
+  offerTitle: string;
+  displayText: string;
+  offerPercentage?: number;
+  condition: string;
+  additionalItem?: string;
+  additionalItemImage?: string;
+  notifyCustomers?: boolean;
+}
+
+export interface OutletConfig {
+  id: string;
+  enabled: boolean;
+  name: string;
+  address?: string;
+  phone: string;
+  latitude: number;
+  longitude: number;
+  deliveryRadiusKm: number;
+  freeDeliveryRadiusKm: number;
+  freeDeliveryMinimumOrder: number;
+  minimumOrderIncrementPerKm: number;
+  deliveryChargePerKm: number;
+}
+

@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Order } from '../types';
+import { getDisplayOrderId } from '../App';
 
 interface PastOrdersProps {
   orders: Order[];
@@ -29,9 +30,18 @@ const PastOrders: React.FC<PastOrdersProps> = ({ orders, onReorder }) => {
             <div key={order.id} className="bg-white rounded-[2.5rem] p-8 md:p-10 shadow-sm border border-orange-50 hover:shadow-xl transition-all duration-500">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 pb-6 border-b border-slate-50">
                 <div>
-                  <div className="flex items-center space-x-3 mb-1">
+                  <div className="flex items-center flex-wrap gap-3 mb-1">
                     <span className="text-xs font-black uppercase tracking-widest text-red-600">Order ID:</span>
-                    <span className="font-mono text-slate-900 font-bold">{order.id}</span>
+                    <span className="font-mono text-slate-900 font-bold">{getDisplayOrderId(order.id)}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                      order.status === 'cancelled' 
+                        ? 'bg-slate-100 text-slate-500 border-slate-200' 
+                        : order.status === 'done' 
+                        ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
+                        : 'bg-amber-100 text-amber-700 border-amber-200'
+                    }`}>
+                      {(order.status ?? 'new').replace(/_/g, ' ')}
+                    </span>
                   </div>
                   <p className="text-slate-400 text-sm font-medium">
                     📅 {new Date(order.receivedAt ?? order.date).toLocaleDateString()} {new Date(order.receivedAt ?? order.date).toLocaleTimeString()}

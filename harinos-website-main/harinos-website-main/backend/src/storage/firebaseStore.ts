@@ -1,6 +1,7 @@
 import admin from 'firebase-admin';
 import { config } from '../config.js';
-import { CustomerProfile, FullOrderPayload, OrderStatus } from '../types.js';
+import { CustomerProfile, FullOrderPayload, OrderStatus, MenuItem, OutletConfig, OfferCard, AdminUser, WalletTransaction } from '../types.js';
+
 import { OrderStore, newestOrdersFirst } from './store.js';
 
 let firestore: admin.firestore.Firestore | null = null;
@@ -88,8 +89,106 @@ export const firebaseStore: OrderStore = {
     const ref = getFirestore().collection('customers').doc(customerId);
     const snap = await withTimeout(ref.get(), 'Reading customer from Firebase');
     if (!snap.exists) return null;
-    const customer = { ...(snap.data() as CustomerProfile), verified: true };
+    const customerData = snap.data() as CustomerProfile;
+
+    const allCustomersSnap = await withTimeout(
+      getFirestore().collection('customers').where('verified', '==', true).get(),
+      'Checking verified customers'
+    );
+    const cleanPhone = (p: string) => p.replace(/\D/g, '');
+    const targetPhone = cleanPhone(customerData.phone);
+    const alreadyVerified = allCustomersSnap.docs.some((doc) => {
+      const data = doc.data() as CustomerProfile;
+      return data.id !== customerId && data.phone && cleanPhone(data.phone) === targetPhone;
+    });
+
+    if (alreadyVerified) {
+      throw new Error('This phone number is already verified under another profile.');
+    }
+
+    const generateReferralCode = () => {
+      return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+    };
+    const referralCode = customerData.referralCode ?? generateReferralCode();
+
+    const customer = { ...customerData, verified: true, referralCode };
     await withTimeout(ref.set(customer, { merge: true }), 'Verifying customer in Firebase');
     return customer;
   },
+
+  async getMenuItems() {
+    const snapshot = await withTimeout(
+      getFirestore().collection('menu_items').get(),
+      'Fetching menu items from Firebase',
+    );
+    return snapshot.docs.map((doc) => doc.data() as MenuItem);
+  },
+
+  async saveMenuItem(item) {
+    await withTimeout(
+      getFirestore().collection('menu_items').doc(item.id).set(item, { merge: true }),
+      'Saving menu item to Firebase',
+    );
+  },
+
+  async getOutlets() {
+    const snapshot = await withTimeout(
+      getFirestore().collection('outlets').get(),
+      'Fetching outlets from Firebase',
+    );
+    return snapshot.docs.map((doc) => doc.data() as OutletConfig);
+  },
+
+  async saveOutlet(outlet) {
+    await withTimeout(
+      getFirestore().collection('outlets').doc(outlet.id).set(outlet, { merge: true }),
+      'Saving outlet to Firebase',
+    );
+  },
+
+  async getOffers() {
+    const snapshot = await withTimeout(
+      getFirestore().collection('offers').get(),
+      'Fetching offers from Firebase',
+    );
+    return snapshot.docs.map((doc) => doc.data() as OfferCard);
+  },
+
+  async saveOffer(offer) {
+    await withTimeout(
+      getFirestore().collection('offers').doc(offer.id).set(offer, { merge: true }),
+      'Saving offer to Firebase',
+    );
+  },
+
+  async getStaffUsers() {
+    const snapshot = await withTimeout(
+      getFirestore().collection('staff_users').get(),
+      'Fetching staff users from Firebase',
+    );
+    return snapshot.docs.map((doc) => doc.data() as AdminUser);
+  },
+
+  async saveStaffUser(user) {
+    await withTimeout(
+      getFirestore().collection('staff_users').doc(user.username).set(user, { merge: true }),
+      'Saving staff user to Firebase',
+    );
+  },
+
+  async getWalletTransactions() {
+    const snapshot = await withTimeout(
+      getFirestore().collection('wallet_transactions').orderBy('createdAt', 'desc').get(),
+      'Fetching transactions from Firebase',
+    );
+    return snapshot.docs.map((doc) => doc.data() as WalletTransaction);
+  },
+
+  async saveWalletTransaction(transaction) {
+    await withTimeout(
+      getFirestore().collection('wallet_transactions').doc(transaction.id).set(transaction, { merge: true }),
+      'Saving transaction to Firebase',
+    );
+  },
 };
+

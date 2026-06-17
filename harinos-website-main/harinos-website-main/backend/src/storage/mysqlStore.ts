@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { config } from '../config.js';
-import { CustomerProfile, FullOrderPayload, OrderStatus } from '../types.js';
+import { CustomerProfile, FullOrderPayload, OrderStatus, MenuItem, OutletConfig, OfferCard, AdminUser, WalletTransaction } from '../types.js';
+
 import { OrderStore, newestOrdersFirst } from './store.js';
 
 let pool: mysql.Pool | null = null;
@@ -47,6 +48,46 @@ const ensureSchema = async (): Promise<void> => {
           verified BOOLEAN NOT NULL DEFAULT FALSE,
           created_at DATETIME NOT NULL,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+
+      await getPool().execute(`
+        CREATE TABLE IF NOT EXISTS menu_items (
+          id VARCHAR(64) PRIMARY KEY,
+          payload JSON NOT NULL,
+          available BOOLEAN NOT NULL DEFAULT TRUE
+        )
+      `);
+
+      await getPool().execute(`
+        CREATE TABLE IF NOT EXISTS outlets (
+          id VARCHAR(64) PRIMARY KEY,
+          payload JSON NOT NULL,
+          enabled BOOLEAN NOT NULL DEFAULT TRUE
+        )
+      `);
+
+      await getPool().execute(`
+        CREATE TABLE IF NOT EXISTS offers (
+          id VARCHAR(64) PRIMARY KEY,
+          payload JSON NOT NULL,
+          enabled BOOLEAN NOT NULL DEFAULT TRUE
+        )
+      `);
+
+      await getPool().execute(`
+        CREATE TABLE IF NOT EXISTS staff_users (
+          username VARCHAR(128) PRIMARY KEY,
+          payload JSON NOT NULL,
+          role VARCHAR(32) NOT NULL
+        )
+      `);
+
+      await getPool().execute(`
+        CREATE TABLE IF NOT EXISTS wallet_transactions (
+          id VARCHAR(64) PRIMARY KEY,
+          payload JSON NOT NULL,
+          created_at DATETIME NOT NULL
         )
       `);
     })();
@@ -152,11 +193,127 @@ export const mysqlStore: OrderStore = {
     await ensureSchema();
     const [rows] = await getPool().execute<mysql.RowDataPacket[]>('SELECT payload FROM customers WHERE id = ?', [customerId]);
     if (!rows.length) return null;
-    const customer: CustomerProfile = { ...parseJsonColumn<CustomerProfile>(rows[0].payload), verified: true };
+    const customerData = parseJsonColumn<CustomerProfile>(rows[0].payload);
+
+    const [allVerifiedRows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM customers WHERE verified = TRUE');
+    const allVerified = allVerifiedRows.map((row) => parseJsonColumn<CustomerProfile>(row.payload));
+    const cleanPhone = (p: string) => p.replace(/\D/g, '');
+    const targetPhone = cleanPhone(customerData.phone);
+    const alreadyVerified = allVerified.some((c) => c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone);
+    if (alreadyVerified) {
+      throw new Error('This phone number is already verified under another profile.');
+    }
+
+    const generateReferralCode = () => {
+      return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+    };
+    const referralCode = customerData.referralCode ?? generateReferralCode();
+
+    const customer: CustomerProfile = { ...customerData, verified: true, referralCode };
     await getPool().execute('UPDATE customers SET payload = CAST(? AS JSON), verified = TRUE WHERE id = ?', [
       JSON.stringify(customer),
       customerId,
     ]);
     return customer;
+  },
+
+  async getMenuItems() {
+    await ensureSchema();
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM menu_items');
+    return rows.map((row) => parseJsonColumn<MenuItem>(row.payload));
+  },
+
+  async saveMenuItem(item) {
+    await ensureSchema();
+    await getPool().execute(
+      `
+        INSERT INTO menu_items (id, payload, available)
+        VALUES (?, CAST(? AS JSON), ?)
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload),
+          available = VALUES(available)
+      `,
+      [item.id, JSON.stringify(item), Boolean(item.available)],
+    );
+  },
+
+  async getOutlets() {
+    await ensureSchema();
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM outlets');
+    return rows.map((row) => parseJsonColumn<OutletConfig>(row.payload));
+  },
+
+  async saveOutlet(outlet) {
+    await ensureSchema();
+    await getPool().execute(
+      `
+        INSERT INTO outlets (id, payload, enabled)
+        VALUES (?, CAST(? AS JSON), ?)
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload),
+          enabled = VALUES(enabled)
+      `,
+      [outlet.id, JSON.stringify(outlet), Boolean(outlet.enabled)],
+    );
+  },
+
+  async getOffers() {
+    await ensureSchema();
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM offers');
+    return rows.map((row) => parseJsonColumn<OfferCard>(row.payload));
+  },
+
+  async saveOffer(offer) {
+    await ensureSchema();
+    await getPool().execute(
+      `
+        INSERT INTO offers (id, payload, enabled)
+        VALUES (?, CAST(? AS JSON), ?)
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload),
+          enabled = VALUES(enabled)
+      `,
+      [offer.id, JSON.stringify(offer), Boolean(offer.enabled)],
+    );
+  },
+
+  async getStaffUsers() {
+    await ensureSchema();
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM staff_users');
+    return rows.map((row) => parseJsonColumn<AdminUser>(row.payload));
+  },
+
+  async saveStaffUser(user) {
+    await ensureSchema();
+    await getPool().execute(
+      `
+        INSERT INTO staff_users (username, payload, role)
+        VALUES (?, CAST(? AS JSON), ?)
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload),
+          role = VALUES(role)
+      `,
+      [user.username, JSON.stringify(user), user.role],
+    );
+  },
+
+  async getWalletTransactions() {
+    await ensureSchema();
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM wallet_transactions ORDER BY created_at DESC');
+    return rows.map((row) => parseJsonColumn<WalletTransaction>(row.payload));
+  },
+
+  async saveWalletTransaction(transaction) {
+    await ensureSchema();
+    await getPool().execute(
+      `
+        INSERT INTO wallet_transactions (id, payload, created_at)
+        VALUES (?, CAST(? AS JSON), ?)
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload),
+          created_at = VALUES(created_at)
+      `,
+      [transaction.id, JSON.stringify(transaction), toMysqlDate(transaction.createdAt)],
+    );
   },
 };

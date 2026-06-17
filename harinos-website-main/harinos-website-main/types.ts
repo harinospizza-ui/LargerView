@@ -100,6 +100,9 @@ export interface Order {
   statusUpdatedAt?: string;
   customerLocation?: CustomerLocation;
   estimatedTime?: string;
+  walletAmountRedeemed?: number;
+  rewardPointsRedeemed?: number;
+  rewardPointsEarned?: number;
 }
 
 export interface Notification {
@@ -137,6 +140,25 @@ export interface CustomerProfile {
   email?: string;
   loginMethod: 'email' | 'phone';
   verified?: boolean;
+  avatar?: string;
+  referralCode?: string;
+  referredBy?: string;
+  referralAttempts?: number;
+  referralApplied?: boolean;
+  otp?: string;
+  createdAt: string;
+  walletBalance?: number;
+  rewardPoints?: number;
+}
+
+export interface WalletTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  amount: number;
+  type: 'topup' | 'reward' | 'debit' | 'credit' | 'admin_adjustment';
+  status: 'pending' | 'completed' | 'failed';
   createdAt: string;
 }
 

@@ -126,7 +126,7 @@ export const sendNotificationToRole = async (
     }
 
     const tokensSnapshot = await query.get();
-    const tokens = tokensSnapshot.docs.map((doc) => doc.data() as DeviceToken);
+    const tokens = tokensSnapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id } as DeviceToken));
 
     if (tokens.length === 0) {
       return { sent: 0, failed: 0, errors: [] };
@@ -156,7 +156,9 @@ export const sendNotificationToRole = async (
           errorMsg.includes('invalid') ||
           errorMsg.includes('not-registered')
         ) {
-          await db.collection('notification_tokens').doc(token.id).update({ isActive: false });
+          if (token.id) {
+            await db.collection('notification_tokens').doc(token.id).update({ isActive: false });
+          }
         }
       }
     }
@@ -193,7 +195,7 @@ export const sendNotificationToCustomer = async (
       .where('isActive', '==', true)
       .get();
 
-    const tokens = tokensSnapshot.docs.map((doc) => doc.data() as DeviceToken);
+    const tokens = tokensSnapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id } as DeviceToken));
 
     if (tokens.length === 0) {
       return { sent: 0, failed: 0, errors: [] };
@@ -221,7 +223,9 @@ export const sendNotificationToCustomer = async (
           errorMsg.includes('invalid') ||
           errorMsg.includes('not-registered')
         ) {
-          await db.collection('notification_tokens').doc(token.id).update({ isActive: false });
+          if (token.id) {
+            await db.collection('notification_tokens').doc(token.id).update({ isActive: false });
+          }
         }
       }
     }
@@ -291,7 +295,7 @@ export const getUserTokens = async (userId: string): Promise<DeviceToken[]> => {
       .where('isActive', '==', true)
       .get();
 
-    return snapshot.docs.map((doc) => doc.data() as DeviceToken);
+    return snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id } as DeviceToken));
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error getting user tokens:', errorMsg);

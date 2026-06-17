@@ -23,6 +23,73 @@ type OrderPayload = {
   [key: string]: unknown;
 };
 
+type AdminRole = 'admin' | 'manager' | 'staff';
+
+type AdminUser = {
+  role: AdminRole;
+  username: string;
+  password: string;
+  outletId: string | null;
+};
+
+type SizeOption = {
+  label: string;
+  price: number;
+};
+
+type MenuItem = {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  image: string;
+  popular?: boolean;
+  spicy?: boolean;
+  vegetarian: boolean;
+  available: boolean;
+  sizes?: SizeOption[];
+};
+
+type OfferCard = {
+  id: string;
+  enabled: boolean;
+  image: string;
+  offerTitle: string;
+  displayText: string;
+  offerPercentage?: number;
+  condition: string;
+  additionalItem?: string;
+  additionalItemImage?: string;
+  notifyCustomers?: boolean;
+};
+
+type OutletConfig = {
+  id: string;
+  enabled: boolean;
+  name: string;
+  address?: string;
+  phone: string;
+  latitude: number;
+  longitude: number;
+  deliveryRadiusKm: number;
+  freeDeliveryRadiusKm: number;
+  freeDeliveryMinimumOrder: number;
+  minimumOrderIncrementPerKm: number;
+  deliveryChargePerKm: number;
+};
+
+type WalletTransaction = {
+  id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  amount: number;
+  type: 'topup' | 'reward' | 'debit' | 'credit' | 'admin_adjustment';
+  status: 'pending' | 'completed' | 'failed';
+  createdAt: string;
+};
+
 const parseServiceAccount = (): admin.ServiceAccount => {
   const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -78,6 +145,157 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'GET' && path === '/health') {
       res.json({ success: true, storageDriver: 'firebase', projectId: process.env.FIREBASE_PROJECT_ID || 'harinos-12902' });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/auth/login') {
+      const { username, password } = req.body as { username?: string; password?: string };
+      if (!username || !password) {
+        res.status(400).json({ success: false, message: 'Missing username or password.' });
+        return;
+      }
+      
+      const DEFAULT_STAFF: AdminUser[] = [
+        { role: 'admin', username: 'Admin_Harinos', password: 'Harinos_Admin', outletId: null },
+        { role: 'manager', username: 'Manager_Harinos', password: 'Harinos_Manager', outletId: null },
+        { role: 'staff', username: 'Staff_Harinos', password: 'Harinos_Staff', outletId: null },
+      ];
+
+      const staffRef = db.collection('staff_users');
+      const snapshot = await staffRef.get();
+      
+      if (snapshot.empty) {
+        for (const user of DEFAULT_STAFF) {
+          await staffRef.doc(user.username).set(user);
+        }
+      }
+      
+      const userDoc = await staffRef.doc(username).get();
+      if (!userDoc.exists) {
+        res.status(401).json({ success: false, message: 'Invalid username or password.' });
+        return;
+      }
+      
+      const user = userDoc.data() as AdminUser;
+      if (user.password !== password) {
+        res.status(401).json({ success: false, message: 'Invalid username or password.' });
+        return;
+      }
+      
+      res.json({
+        success: true,
+        user: {
+          role: user.role,
+          username: user.username,
+          outletId: user.outletId,
+        },
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/auth/change-password') {
+      const { username, newPassword } = req.body as { username?: string; newPassword?: string };
+      if (!username || !newPassword) {
+        res.status(400).json({ success: false, message: 'Missing username or new password.' });
+        return;
+      }
+      const staffRef = db.collection('staff_users');
+      const docRef = staffRef.doc(username);
+      const docSnap = await docRef.get();
+      if (!docSnap.exists) {
+        res.status(404).json({ success: false, message: 'Staff user not found.' });
+        return;
+      }
+      await docRef.set({ password: newPassword }, { merge: true });
+      res.json({ success: true, message: 'Password updated successfully.' });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/menu-items') {
+      const snapshot = await db.collection('menu_items').get();
+      res.json({ success: true, menuItems: snapshot.docs.map((doc) => doc.data()) });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/menu-items') {
+      const item = req.body as MenuItem;
+      await db.collection('menu_items').doc(item.id).set(item, { merge: true });
+      res.json({ success: true });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/menu-items/seed') {
+      const items = req.body as MenuItem[];
+      const batch = db.batch();
+      for (const item of items) {
+        const docRef = db.collection('menu_items').doc(item.id);
+        batch.set(docRef, item, { merge: true });
+      }
+      await batch.commit();
+      res.json({ success: true, count: items.length });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/wallet/transactions') {
+      const snapshot = await db.collection('wallet_transactions').orderBy('createdAt', 'desc').get();
+      res.json({ success: true, transactions: snapshot.docs.map((doc) => doc.data()) });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/wallet/transactions') {
+      const transaction = req.body as WalletTransaction;
+      await db.collection('wallet_transactions').doc(transaction.id).set(transaction, { merge: true });
+      res.json({ success: true });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/outlets') {
+      const snapshot = await db.collection('outlets').get();
+      res.json({ success: true, outlets: snapshot.docs.map((doc) => doc.data()) });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/outlets') {
+      const outlet = req.body as OutletConfig;
+      await db.collection('outlets').doc(outlet.id).set(outlet, { merge: true });
+      res.json({ success: true });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/outlets/seed') {
+      const outlets = req.body as OutletConfig[];
+      const batch = db.batch();
+      for (const outlet of outlets) {
+        const docRef = db.collection('outlets').doc(outlet.id);
+        batch.set(docRef, outlet, { merge: true });
+      }
+      await batch.commit();
+      res.json({ success: true, count: outlets.length });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/offers') {
+      const snapshot = await db.collection('offers').get();
+      res.json({ success: true, offers: snapshot.docs.map((doc) => doc.data()) });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/offers') {
+      const offer = req.body as OfferCard;
+      await db.collection('offers').doc(offer.id).set(offer, { merge: true });
+      res.json({ success: true });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/offers/seed') {
+      const offers = req.body as OfferCard[];
+      const batch = db.batch();
+      for (const offer of offers) {
+        const docRef = db.collection('offers').doc(offer.id);
+        batch.set(docRef, offer, { merge: true });
+      }
+      await batch.commit();
+      res.json({ success: true, count: offers.length });
       return;
     }
 

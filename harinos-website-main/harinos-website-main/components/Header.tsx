@@ -12,6 +12,8 @@ interface HeaderProps {
   onShare: () => void;
   onNotificationsEnabled: () => void;
   onAdminTrigger?: () => void;
+  customerProfile?: any;
+  onWalletClick?: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -23,6 +25,8 @@ const Header: React.FC<HeaderProps> = ({
   onShare,
   onNotificationsEnabled,
   onAdminTrigger,
+  customerProfile,
+  onWalletClick,
 }) => {
   const [scrolled, setScrolled] = useState(false);
   const [notifStatus, setNotifStatus] = useState<NotificationPermission>('default');
@@ -160,108 +164,35 @@ const Header: React.FC<HeaderProps> = ({
           </button>
 
           <div className="flex items-center space-x-3">
-            <div className="hidden md:flex space-x-8 text-[10px] font-black uppercase tracking-widest mr-4">
+            {customerProfile && onWalletClick && (
               <button
-                onClick={onViewMenu}
-                className={`transition-colors hover:text-red-500 ${
-                  activeView === 'menu' ? 'text-red-600' : isScrolledOrLight ? 'text-slate-600' : 'text-white/80'
+                onClick={onWalletClick}
+                className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold border transition-premium btn-hover-scale mr-1 ${
+                  isScrolledOrLight
+                    ? 'bg-slate-50 border-slate-200 text-slate-800 shadow-sm'
+                    : 'bg-white/10 border-white/10 text-white backdrop-blur-md'
                 }`}
+                title="View Profile"
               >
-                Menu
-              </button>
-              <button
-                onClick={onViewOrders}
-                className={`transition-colors hover:text-red-500 ${
-                  activeView === 'orders'
-                    ? 'text-red-600'
-                    : isScrolledOrLight
-                      ? 'text-slate-600'
-                      : 'text-white/80'
-                }`}
-              >
-                History
-              </button>
-            </div>
-
-            <div className="relative flex items-center space-x-2">
-              {!isInstalled && (canPromptInstall || needsIosInstructions) && (
-                <button
-                  onClick={handleInstall}
-                  className={`install-attention flex items-center gap-2 rounded-2xl px-3 py-3 md:px-4 md:py-4 transition-all duration-300 active:scale-90 ${
-                    isScrolledOrLight
-                      ? 'bg-emerald-50 text-emerald-700 ring-2 ring-emerald-200'
-                      : 'bg-emerald-500/20 text-white ring-2 ring-emerald-300/45 backdrop-blur-md'
-                  }`}
-                  title={canPromptInstall ? 'Install App' : 'Install on iPhone or iPad'}
-                >
-                  <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" />
-                  </svg>
-                  <span className="text-[10px] font-black uppercase tracking-[0.22em]">
-                    Install
-                  </span>
-                </button>
-              )}
-
-              <button
-                onClick={handleRequestNotifs}
-                className={`p-3 md:p-4 rounded-2xl transition-all duration-300 active:scale-90 relative ${
-                  isScrolledOrLight ? 'bg-slate-100 text-slate-600' : 'bg-white/5 text-white'
-                }`}
-                title="Enable Notifications"
-              >
-                <svg
-                  className="w-5 h-5 md:w-6 md:h-6"
-                  fill={notifStatus === 'granted' ? 'currentColor' : 'none'}
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                  />
-                </svg>
-                {notifStatus === 'default' && (
-                  <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                {customerProfile.avatar ? (
+                  <img src={customerProfile.avatar} className="w-5 h-5 rounded-full object-cover" alt="Profile" />
+                ) : (
+                  <span>👤</span>
+                )}
+                <span className="font-black">{customerProfile.name.split(' ')[0]}</span>
+                {customerProfile.verified && (
+                  <span className="inline-flex items-center justify-center bg-blue-500 text-white rounded-full w-3.5 h-3.5 text-[8px] font-black" title="Verified Customer">✓</span>
                 )}
               </button>
+            )}
 
-              {needsIosInstructions && showInstallHelp && (
-                <div className="absolute right-0 top-full z-[120] mt-3 w-64 rounded-[1.5rem] border border-orange-100 bg-white p-4 text-left shadow-2xl">
-                  <div className="text-[8px] font-black uppercase tracking-[0.2em] text-red-600">
-                    Install on iPhone / iPad
-                  </div>
-                  <p className="mt-2 text-[11px] leading-5 text-slate-600">
-                    Open this site in Safari, tap the Share button, then choose Add to Home Screen.
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={onShare}
-                className={`flex p-3 md:p-4 rounded-2xl transition-all duration-300 active:scale-90 ${
-                  isScrolledOrLight ? 'bg-slate-100 text-slate-600' : 'bg-white/5 text-white'
-                }`}
-                title="Share Harino's"
-                aria-label="Share Harino's"
-              >
-                <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2.2"
-                    d="M12 16V4m0 0l-4 4m4-4l4 4M5 12v7a1 1 0 001 1h12a1 1 0 001-1v-7"
-                  />
-                </svg>
-              </button>
-
+            <div className="relative flex items-center space-x-2">
               <button
                 onClick={onCartClick}
                 className={`relative p-3 md:p-4 rounded-2xl transition-all duration-300 active:scale-90 ${
-                  isScrolledOrLight ? 'bg-red-600 text-white shadow-lg' : 'bg-white/10 text-white backdrop-blur-md'
+                  isScrolledOrLight ? 'bg-red-600 text-white shadow-lg shadow-red-500/20' : 'bg-white/10 text-white backdrop-blur-md'
                 }`}
+                aria-label="View Cart"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />

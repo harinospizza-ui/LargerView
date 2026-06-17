@@ -165,7 +165,8 @@ export const subscribeFCMMessages = (
       }
 
       // Default: show notification in app
-      const { title, body, data } = payload.notification || {};
+      const { title, body } = payload.notification || {};
+      const data = payload.data;
       if (title && body) {
         // Show as browser notification if permission granted
         if (Notification.permission === 'granted') {

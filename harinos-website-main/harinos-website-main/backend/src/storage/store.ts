@@ -1,4 +1,4 @@
-import { CustomerProfile, FullOrderPayload, OrderStatus } from '../types.js';
+import { CustomerProfile, FullOrderPayload, OrderStatus, MenuItem, OutletConfig, OfferCard, AdminUser, WalletTransaction } from '../types.js';
 
 export interface OrderStore {
   name: string;
@@ -8,6 +8,16 @@ export interface OrderStore {
   getCustomers(): Promise<CustomerProfile[]>;
   saveCustomer(profile: CustomerProfile): Promise<void>;
   verifyCustomer(customerId: string): Promise<CustomerProfile | null>;
+  getMenuItems(): Promise<MenuItem[]>;
+  saveMenuItem(item: MenuItem): Promise<void>;
+  getOutlets(): Promise<OutletConfig[]>;
+  saveOutlet(outlet: OutletConfig): Promise<void>;
+  getOffers(): Promise<OfferCard[]>;
+  saveOffer(offer: OfferCard): Promise<void>;
+  getStaffUsers(): Promise<AdminUser[]>;
+  saveStaffUser(user: AdminUser): Promise<void>;
+  getWalletTransactions(): Promise<WalletTransaction[]>;
+  saveWalletTransaction(transaction: WalletTransaction): Promise<void>;
 }
 
 export const newestOrdersFirst = (orders: FullOrderPayload[]): FullOrderPayload[] =>

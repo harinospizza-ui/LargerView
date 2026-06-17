@@ -25,12 +25,40 @@ export const NotificationService = {
   },
 
   show: (title: string, body: string, icon?: string) => {
-    if (getNotificationPermission() === 'granted') {
-      new Notification(title, {
-        body,
-        icon: icon || DEFAULT_ICON,
-        badge: DEFAULT_ICON,
-      });
+    if (getNotificationPermission() !== 'granted') return;
+
+    const options = {
+      body,
+      icon: icon || DEFAULT_ICON,
+      badge: DEFAULT_ICON,
+      vibrate: [100, 50, 100],
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready
+        .then((registration) => {
+          registration.showNotification(title, options).catch((err) => {
+            console.error('SW notification failed, falling back:', err);
+            try {
+              new Notification(title, options);
+            } catch (e) {
+              console.error('Fallback notification failed:', e);
+            }
+          });
+        })
+        .catch(() => {
+          try {
+            new Notification(title, options);
+          } catch (e) {
+            console.error('Fallback notification failed:', e);
+          }
+        });
+    } else {
+      try {
+        new Notification(title, options);
+      } catch (e) {
+        console.error('Native notification failed:', e);
+      }
     }
   },
 

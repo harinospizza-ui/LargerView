@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { CustomerProfile, FullOrderPayload, OrderStatus } from '../types.js';
+import { CustomerProfile, FullOrderPayload, OrderStatus, WalletTransaction } from '../types.js';
 import { getOrderStore } from '../storage/index.js';
 import {
   sendNotificationToRole,
@@ -7,6 +7,21 @@ import {
 } from '../services/fcmService.js';
 
 const router = Router();
+
+const getPendingOrdersCount = async (role: string, outletId?: string): Promise<number> => {
+  try {
+    const store = getOrderStore();
+    const orders = await store.getOrders();
+    const pending = orders.filter((o) => !['done', 'cancelled'].includes(o.status || 'new'));
+    if (role === 'admin' || !outletId) {
+      return pending.length;
+    }
+    return pending.filter((o) => o.outletId === outletId).length;
+  } catch (err) {
+    console.error('Failed to get pending orders count:', err);
+    return 0;
+  }
+};
 
 router.get('/orders', async (_req, res, next) => {
   try {
@@ -41,23 +56,29 @@ router.post('/orders/full', async (req, res, next) => {
     const itemText = `${itemSummary}${additionalInfo ? ' ' + additionalInfo : ''}`;
 
     // Notify admins (all outlets)
+    const adminPendingCount = await getPendingOrdersCount('admin');
     void sendNotificationToRole('NEW_ORDER', order.id!, 'admin', undefined, {
       itemSummary: itemText,
       orderType: fullOrder.orderType,
       total: String(Math.round(fullOrder.total)),
+      pendingCount: String(adminPendingCount),
     }).catch((err) => console.error('Error notifying admins:', err));
 
     // Notify managers for the outlet
     if (fullOrder.outletId) {
+      const staffPendingCount = await getPendingOrdersCount('staff', fullOrder.outletId);
+
       void sendNotificationToRole('NEW_ORDER', order.id!, 'manager', fullOrder.outletId, {
         itemSummary: itemText,
         orderType: fullOrder.orderType,
+        pendingCount: String(staffPendingCount),
       }).catch((err) => console.error('Error notifying managers:', err));
 
       // Notify staff for the outlet
       void sendNotificationToRole('NEW_ORDER', order.id!, 'staff', fullOrder.outletId, {
         itemSummary: itemText,
         orderType: fullOrder.orderType,
+        pendingCount: String(staffPendingCount),
       }).catch((err) => console.error('Error notifying staff:', err));
     }
 
@@ -185,6 +206,29 @@ router.patch('/customers/:customerId/verify', async (req, res, next) => {
     }
 
     res.json({ success: true, customer });
+  } catch (error: any) {
+    if (error && error.message && error.message.includes('already verified')) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get('/wallet/transactions', async (_req, res, next) => {
+  try {
+    const transactions = await getOrderStore().getWalletTransactions();
+    res.json({ success: true, transactions });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/wallet/transactions', async (req, res, next) => {
+  try {
+    const transaction = req.body as WalletTransaction;
+    await getOrderStore().saveWalletTransaction(transaction);
+    res.status(201).json({ success: true });
   } catch (error) {
     next(error);
   }

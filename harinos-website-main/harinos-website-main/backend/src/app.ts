@@ -3,6 +3,8 @@ import cors from 'cors';
 import { config } from './config.js';
 import ordersRouter from './routes/orders.js';
 import notificationsRouter from './routes/notifications.js';
+import authRouter from './routes/auth.js';
+import menuRouter from './routes/menu.js';
 import { getOrderStore } from './storage/index.js';
 
 export const createApp = () => {
@@ -20,6 +22,8 @@ export const createApp = () => {
   });
 
   app.use('/', ordersRouter);
+  app.use('/', menuRouter);
+  app.use('/auth', authRouter);
   app.use('/notifications', notificationsRouter);
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

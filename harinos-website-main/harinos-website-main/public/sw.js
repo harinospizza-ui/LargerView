@@ -87,9 +87,25 @@ self.addEventListener('push', (event) => {
     ],
   };
 
-  event.waitUntil(
-    self.registration.showNotification(notification.title || 'Harino\'s', options),
-  );
+  const promises = [];
+  promises.push(self.registration.showNotification(notification.title || 'Harino\'s', options));
+
+  // Set homescreen app icon badge if pendingCount exists
+  if (data && data.pendingCount) {
+    const count = parseInt(data.pendingCount, 10);
+    if (!isNaN(count)) {
+      const nav = self.navigator || navigator;
+      if (nav && 'setAppBadge' in nav) {
+        if (count > 0) {
+          promises.push(nav.setAppBadge(count));
+        } else {
+          promises.push(nav.clearAppBadge());
+        }
+      }
+    }
+  }
+
+  event.waitUntil(Promise.all(promises));
 });
 
 /**
