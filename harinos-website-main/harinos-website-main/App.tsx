@@ -16,6 +16,7 @@ import {
 } from './types';
 import { MENU_ITEMS, OFFER_CARDS, OUTLET_LOCATIONS } from './constants';
 import { StorageService } from './services/storage';
+import { setDynamicFirebaseConfig } from './services/firebaseClient';
 import { NotificationService } from './services/notification';
 import { getServerOrders, saveCustomerToServer, saveFullOrderToServer, subscribeServerOrder, getServerMenuItems, seedMenuItemsToServer, subscribeServerMenuItems, getServerOutlets, seedOutletsToServer, subscribeServerOutlets, getServerOffers, seedOffersToServer, subscribeServerOffers, saveWalletTransactionToServer, getServerCustomers, verifyServerCustomer } from './services/orderApi';
 import { copyTextToClipboard, getNotificationPermission } from './services/browserSupport';
@@ -219,6 +220,27 @@ const App: React.FC = () => {
   const [menuItems, setMenuItems] = useState<MenuItem[]>(extendMenuItemsWithGeneratedSeries(MENU_ITEMS));
   const [outlets, setOutlets] = useState<OutletConfig[]>(OUTLET_LOCATIONS);
   const [offers, setOffers] = useState<OfferCard[]>(OFFER_CARDS);
+  const [configLoaded, setConfigLoaded] = useState(false);
+
+  // Fetch dynamic client Firebase config from serverless backend on startup
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const response = await fetch('/api/firebase-config');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.config && data.config.apiKey) {
+            setDynamicFirebaseConfig(data.config);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch Firebase config:', err);
+      } finally {
+        setConfigLoaded(true);
+      }
+    };
+    fetchConfig();
+  }, []);
 
   // Request notification permission on app load
   useEffect(() => {
@@ -227,6 +249,8 @@ const App: React.FC = () => {
 
   // Fetch dynamic menu, outlets, offers and auto-seed if empty
   useEffect(() => {
+    if (!configLoaded) return;
+
     let unsubscribeMenu: (() => void) | null = null;
     let unsubscribeOutlets: (() => void) | null = null;
     let unsubscribeOffers: (() => void) | null = null;
@@ -292,7 +316,7 @@ const App: React.FC = () => {
       unsubscribeOutlets?.();
       unsubscribeOffers?.();
     };
-  }, []);
+  }, [configLoaded]);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const applyAppScreen = useCallback((screen: AppScreen) => {
@@ -404,6 +428,7 @@ const App: React.FC = () => {
   }, [activeOfferCards]);
 
   useEffect(() => {
+    if (!configLoaded) return;
     const retryPendingOrders = () => {
       const pendingOrders = StorageService.getPendingOrderSyncQueue();
       if (!pendingOrders.length) return;
@@ -422,7 +447,7 @@ const App: React.FC = () => {
       window.clearInterval(retryTimer);
       window.removeEventListener('online', retryPendingOrders);
     };
-  }, []);
+  }, [configLoaded]);
 
   const activeOrder = useMemo(() => {
     return pastOrders.find((order) => order.status !== 'done' && order.status !== 'cancelled');
@@ -431,7 +456,7 @@ const App: React.FC = () => {
   const trackedOrderId = activeOrder?.id || latestOrder?.id;
 
   useEffect(() => {
-    if (!trackedOrderId) return;
+    if (!configLoaded || !trackedOrderId) return;
     const unsubscribe = subscribeServerOrder(
       trackedOrderId,
       (order) => {
@@ -463,10 +488,10 @@ const App: React.FC = () => {
       unsubscribe?.();
       window.clearInterval(statusPoll);
     };
-  }, [trackedOrderId, latestOrder?.id]);
+  }, [configLoaded, trackedOrderId, latestOrder?.id]);
 
   useEffect(() => {
-    if (!customerProfile?.id) return;
+    if (!configLoaded || !customerProfile?.id) return;
     let isMounted = true;
 
     const pollProfile = async () => {
@@ -497,7 +522,7 @@ const App: React.FC = () => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [customerProfile?.id]);
+  }, [configLoaded, customerProfile?.id]);
 
   const showNotification = useCallback((messageOrObj: string | { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error' }) => {
     let title = "Harino's Pizza";

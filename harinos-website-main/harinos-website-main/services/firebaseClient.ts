@@ -11,6 +11,12 @@ const firebaseConfig = {
   appId: (import.meta.env.VITE_FIREBASE_APP_ID ?? '').trim(),
 };
 
+let dynamicFirebaseConfig: any = null;
+
+export const setDynamicFirebaseConfig = (config: any) => {
+  dynamicFirebaseConfig = config;
+};
+
 export const FIRESTORE_ORDERS_COLLECTION = 'orders';
 export const FIRESTORE_CUSTOMERS_COLLECTION = 'customers';
 export const FIRESTORE_NOTIFICATION_TOKENS_COLLECTION = 'notification_tokens';
@@ -20,16 +26,22 @@ export const FIRESTORE_OFFERS_COLLECTION = 'offers';
 export const FIRESTORE_STAFF_USERS_COLLECTION = 'staff_users';
 export const FIRESTORE_WALLET_TRANSACTIONS_COLLECTION = 'wallet_transactions';
 
-
-export const isFirebaseClientConfigured = (): boolean =>
-  Boolean(firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId);
+export const isFirebaseClientConfigured = (): boolean => {
+  const cfg = dynamicFirebaseConfig || firebaseConfig;
+  return Boolean(cfg.apiKey && cfg.authDomain && cfg.projectId && cfg.appId);
+};
 
 export const getFirebaseApp = (): FirebaseApp => {
-  if (!isFirebaseClientConfigured()) {
-    throw new Error('Firebase client is not configured. Add VITE_FIREBASE_* environment variables in Vercel.');
+  if (getApps().length) {
+    return getApps()[0];
   }
 
-  return getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+  const cfg = dynamicFirebaseConfig || firebaseConfig;
+  if (!cfg.apiKey || !cfg.authDomain || !cfg.projectId || !cfg.appId) {
+    throw new Error('Firebase client is not configured.');
+  }
+
+  return initializeApp(cfg);
 };
 
 export const db = () => getFirestore(getFirebaseApp());
