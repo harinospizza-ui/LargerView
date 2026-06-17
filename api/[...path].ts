@@ -366,8 +366,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const verifyMatch = path.match(/^\/customers\/([^/]+)\/verify$/);
     if (req.method === 'PATCH' && verifyMatch) {
-      await db.collection('customers').doc(decodeURIComponent(verifyMatch[1])).set({ verified: true }, { merge: true });
-      res.json({ success: true });
+      const customerId = decodeURIComponent(verifyMatch[1]);
+      const docRef = db.collection('customers').doc(customerId);
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        res.status(404).json({ success: false, message: 'Customer not found.' });
+        return;
+      }
+      const customerData = snap.data() as CustomerProfile;
+
+      const allCustomersSnap = await db.collection('customers').where('verified', '==', true).get();
+      const cleanPhone = (p: string) => p.replace(/\D/g, '');
+      const targetPhone = cleanPhone(customerData.phone);
+      const alreadyVerified = allCustomersSnap.docs.some((doc) => {
+        const data = doc.data() as CustomerProfile;
+        return data.id !== customerId && data.phone && cleanPhone(data.phone) === targetPhone;
+      });
+
+      if (alreadyVerified) {
+        res.status(400).json({ success: false, message: 'This phone number is already verified under another profile.' });
+        return;
+      }
+
+      const generateReferralCode = () => {
+        return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+      };
+      const referralCode = customerData.referralCode ?? generateReferralCode();
+
+      const customer = { ...customerData, verified: true, referralCode };
+      await docRef.set(customer, { merge: true });
+      res.json({ success: true, customer });
       return;
     }
 
