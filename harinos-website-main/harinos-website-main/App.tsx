@@ -490,18 +490,19 @@ const App: React.FC = () => {
       () => undefined,
     );
     const statusPoll = window.setInterval(() => {
-      void getServerOrders()
-        .then((orders) => {
-          const updatedOrder = orders.find((order) => order.id === trackedOrderId);
-          if (!updatedOrder) return;
-          setPastOrders((currentOrders) =>
-            currentOrders.map((currentOrder) => (currentOrder.id === updatedOrder.id ? updatedOrder : currentOrder)),
-          );
-          if (latestOrder?.id === updatedOrder.id) {
-            setLatestOrder(updatedOrder);
-          }
-        })
-        .catch(() => undefined);
+      void import('./services/orderApi').then(({ getServerOrderById }) => {
+        getServerOrderById(trackedOrderId)
+          .then((updatedOrder) => {
+            if (!updatedOrder) return;
+            setPastOrders((currentOrders) =>
+              currentOrders.map((currentOrder) => (currentOrder.id === updatedOrder.id ? updatedOrder : currentOrder)),
+            );
+            if (latestOrder?.id === updatedOrder.id) {
+              setLatestOrder(updatedOrder);
+            }
+          })
+          .catch(() => undefined);
+      });
     }, 5000);
     return () => {
       unsubscribe?.();

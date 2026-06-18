@@ -1168,6 +1168,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const statusMatch = path.match(/^\/orders\/([^/]+)\/status$/);
+    const getOrderMatch = path.match(/^\/orders\/([^/]+)$/);
+
+    if (req.method === 'GET' && getOrderMatch) {
+      const orderId = decodeURIComponent(getOrderMatch[1]);
+      
+      if (isUsingRestDb) {
+        try {
+          const order = await restGetDocument('orders', orderId);
+          if (order && !order.isDeleted) {
+            res.json({ success: true, order });
+            return;
+          }
+          res.status(404).json({ success: false, message: 'Order not found.' });
+          return;
+        } catch (err) {
+          console.warn('REST get order by id failed, falling back:', err);
+          isUsingRestDb = false;
+          isUsingMemoryDb = true;
+        }
+      }
+
+      if (isUsingMemoryDb) {
+        const localDb = loadLocalDb();
+        const order = localDb.orders.find((o: any) => o.id === orderId && !o.isDeleted);
+        if (order) {
+          res.json({ success: true, order });
+          return;
+        }
+        res.status(404).json({ success: false, message: 'Order not found.' });
+        return;
+      }
+
+      const snap = await db!.collection('orders').doc(orderId).get();
+      if (!snap.exists) {
+        res.status(404).json({ success: false, message: 'Order not found.' });
+        return;
+      }
+      const order = snap.data() as any;
+      if (order.isDeleted) {
+        res.status(404).json({ success: false, message: 'Order not found.' });
+        return;
+      }
+      res.json({ success: true, order });
+      return;
+    }
+
     if (req.method === 'PATCH' && statusMatch) {
       const caller = authenticateRequest(req);
       if (!caller) {

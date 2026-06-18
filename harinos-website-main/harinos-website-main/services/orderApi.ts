@@ -2,6 +2,7 @@ import { CustomerProfile, Order, OrderStatus, MenuItem, OutletConfig, OfferCard,
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -141,6 +142,30 @@ export const getServerOrders = async (): Promise<Order[]> => {
   } catch (error) {
     console.warn('API get orders failed, using cached orders:', error);
     return sortOrders(StorageService.getAdminOrders());
+  }
+};
+
+export const getServerOrderById = async (orderId: string): Promise<Order | null> => {
+  if (isFirebaseClientConfigured()) {
+    try {
+      const snap = await getDoc(doc(db(), FIRESTORE_ORDERS_COLLECTION, orderId));
+      if (snap.exists()) return snap.data() as Order;
+      return null;
+    } catch (error) {
+      if (!getApiBase()) return StorageService.getAdminOrders().find(o => o.id === orderId) || null;
+    }
+  }
+
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return StorageService.getAdminOrders().find(o => o.id === orderId) || null;
+    const response = await fetch(`${apiBase}/orders/${encodeURIComponent(orderId)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.order || null;
+  } catch (error) {
+    console.warn('API get order by id failed, using cached orders:', error);
+    return StorageService.getAdminOrders().find(o => o.id === orderId) || null;
   }
 };
 
