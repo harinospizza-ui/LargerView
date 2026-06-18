@@ -609,6 +609,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       if (isUsingMemoryDb) {
         const localDb = loadLocalDb();
+        if (!localDb.staff_users || localDb.staff_users.length === 0) {
+          localDb.staff_users = [];
+          for (const user of DEFAULT_STAFF) {
+            localDb.staff_users.push({ ...user, password: hashPassword(user.password) });
+          }
+          saveLocalDb(localDb);
+        }
+        
         const user = localDb.staff_users.find((u: any) => u.username === username);
         if (!user) {
           await logSecurityEvent('FAILED_LOGIN', username, 'Non-existent user attempt', clientIp);

@@ -29,9 +29,12 @@ const originalFetch = window.fetch;
 const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const response = await originalFetch(input, init);
   if (response.status === 401) {
-    console.warn('Unauthorized API request (401). Clearing session and dispatching logout event.');
-    StorageService.clearAdminSession();
-    window.dispatchEvent(new CustomEvent('harinos-unauthorized'));
+    const session = StorageService.getAdminSession();
+    if (session) {
+      console.warn('Unauthorized API request (401). Clearing session and dispatching logout event.');
+      StorageService.clearAdminSession();
+      window.dispatchEvent(new CustomEvent('harinos-unauthorized'));
+    }
   }
   return response;
 };
