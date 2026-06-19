@@ -559,7 +559,7 @@ const sendNewOrderNotifications = async (order: any) => {
     const activeOrdersSnap = await db.collection('orders')
       .where('status', 'in', ['new', 'preparing', 'ready', 'out_for_delivery'])
       .get();
-    
+
     const activeOrders = activeOrdersSnap.docs.map(doc => doc.data());
     const adminPendingCount = activeOrders.length;
     const outletPendingCount = order.outletId ? activeOrders.filter(o => o.outletId === order.outletId).length : adminPendingCount;
@@ -630,7 +630,10 @@ const authenticateRequest = (req: VercelRequest): any => {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization'
+  );
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
@@ -697,26 +700,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           user: { role: user.role, username: user.username, outletId: user.outletId },
         });
       };
-
-      
+
+
+
+
 
       const staffRef = db.collection('users');
       const snapshot = await staffRef.get();
-      
+
       if (snapshot.empty) {
         for (const user of DEFAULT_STAFF) {
           const hashedUser = { ...user, password: hashPassword(user.password) };
           await staffRef.doc(user.username).set(hashedUser);
         }
       }
-      
+
       const userDoc = await staffRef.doc(username).get();
       if (!userDoc.exists) {
         await logSecurityEvent('FAILED_LOGIN', username, 'Non-existent user attempt', clientIp);
         res.status(401).json({ success: false, message: 'Invalid username or password.' });
         return;
       }
-      
+
       const user = userDoc.data() as AdminUser;
       await handleUserAuth(user, async (hashed) => {
         await staffRef.doc(username).update({ password: hashed });
@@ -739,8 +744,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const hashed = hashPassword(newPassword);
-
-      
+
+
+
+
 
       const staffRef = db.collection('users');
       const docRef = staffRef.doc(username);
@@ -755,7 +762,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-        if (req.method === 'GET' && path === '/menu-items') {
+    if (req.method === 'GET' && path === '/menu-items') {
       const snapshot = await db.collection('menu_items').get();
       if (snapshot.empty) {
         const batch = db.batch();
@@ -774,8 +781,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/menu-items') {
       const item = req.body as MenuItem;
-
-      
+
+
+
+
 
       await db.collection('menu_items').doc(item.id).set(item, { merge: true });
       res.json({ success: true });
@@ -784,8 +793,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/menu-items/seed') {
       const items = req.body as MenuItem[];
-
-      
+
+
+
+
 
       const batch = db.batch();
       for (const item of items) {
@@ -807,8 +818,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(403).json({ success: false, message: 'Forbidden.' });
         return;
       }
-
-
+
+
+
+
 
       const snapshot = await db.collection('wallet_transactions').orderBy('createdAt', 'desc').get();
       res.json({ success: true, transactions: snapshot.docs.map((doc) => doc.data()) });
@@ -827,15 +840,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const transaction = req.body as WalletTransaction;
-
-      
+
+
+
+
 
       await db.collection('wallet_transactions').doc(transaction.id).set(transaction, { merge: true });
       res.json({ success: true });
       return;
     }
 
-        if (req.method === 'GET' && path === '/outlets') {
+    if (req.method === 'GET' && path === '/outlets') {
       const snapshot = await db.collection('outlets').get();
       if (snapshot.empty) {
         const batch = db.batch();
@@ -854,8 +869,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/outlets') {
       const outlet = req.body as OutletConfig;
-
-      
+
+
+
+
 
       await db.collection('outlets').doc(outlet.id).set(outlet, { merge: true });
       res.json({ success: true });
@@ -864,8 +881,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/outlets/seed') {
       const outlets = req.body as OutletConfig[];
-
-      
+
+
+
+
 
       const batch = db.batch();
       for (const outlet of outlets) {
@@ -877,7 +896,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-        if (req.method === 'GET' && path === '/offers') {
+    if (req.method === 'GET' && path === '/offers') {
       const snapshot = await db.collection('offers').get();
       if (snapshot.empty) {
         const batch = db.batch();
@@ -896,8 +915,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/offers') {
       const offer = req.body as OfferCard;
-
-      
+
+
+
+
 
       await db.collection('offers').doc(offer.id).set(offer, { merge: true });
       res.json({ success: true });
@@ -906,8 +927,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'POST' && path === '/offers/seed') {
       const offers = req.body as OfferCard[];
-
-      
+
+
+
+
 
       const batch = db.batch();
       for (const offer of offers) {
@@ -926,7 +949,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
-            const filterOrdersByRole = (ordersList: any[]) => {
+      const filterOrdersByRole = (ordersList: any[]) => {
         let result = ordersList;
         if (caller.role === 'staff') {
           result = result.filter(o => !o.isDeleted && (caller.outletId ? o.outletId === caller.outletId : true));
@@ -953,8 +976,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Admin can see everything including soft deleted
         return result;
       };
-
-
+
+
+
+
 
       const snapshot = await db.collection('orders').orderBy('receivedAt', 'desc').limit(500).get();
       const rawOrders = snapshot.docs.map((doc) => doc.data());
@@ -963,7 +988,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-        if (req.method === 'POST' && path === '/orders') {
+    if (req.method === 'POST' && path === '/orders') {
       const order = req.body as Partial<OrderPayload>;
       if (!Array.isArray(order.items)) {
         res.status(400).json({ success: false, message: 'Invalid order payload: items list is required.' });
@@ -995,7 +1020,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
 
       await db.collection('orders').doc(orderId).set(nextOrder);
-      
+
       // Send background new order FCM alerts to admin/manager/staff
       void sendNewOrderNotifications(nextOrder).catch((err) => console.error('Error notifying new order:', err));
 
@@ -1015,8 +1040,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         receivedAt: order.receivedAt ?? new Date().toISOString(),
         status: order.status ?? 'new',
       };
-
-
+
+
+
+
 
       await db.collection('orders').doc(nextOrder.id).set(nextOrder, { merge: true });
       res.status(201).json({ success: true, orderId: nextOrder.id });
@@ -1028,20 +1055,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'GET' && getOrderMatch) {
       const orderId = decodeURIComponent(getOrderMatch[1]);
-      
-
+
+
+
+
 
       const snap = await db.collection('orders').doc(orderId).get();
       if (!snap.exists) {
         res.status(404).json({ success: false, message: 'Order not found.' });
         return;
       }
-            const order = snap.data() as any;
+      const order = snap.data() as any;
       if (order.isDeleted) {
         res.status(404).json({ success: false, message: 'Order not found.' });
         return;
       }
-      
+
       // Strip financial info for staff callers
       const caller = authenticateRequest(req);
       if (caller && caller.role === 'staff') {
@@ -1063,7 +1092,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-        if (req.method === 'PATCH' && statusMatch) {
+    if (req.method === 'PATCH' && statusMatch) {
       const caller = authenticateRequest(req);
       if (!caller) {
         res.status(401).json({ success: false, message: 'Unauthorized.' });
@@ -1079,7 +1108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ success: false, message: 'Cancellation reason is required.' });
         return;
       }
-      
+
       // Staff cannot cancel orders
       if (status === 'cancelled' && caller.role !== 'admin' && caller.role !== 'manager') {
         res.status(403).json({ success: false, message: 'Forbidden. Staff cannot cancel orders.' });
@@ -1121,7 +1150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (status === 'cancelled') {
         await logSecurityEvent('ORDER_CANCELLED', caller.username, `Order: ${orderId}, Reason: ${reason}`);
       }
-      
+
       // Dispatch FCM notifications
       const customerNotifiableStatuses = ['preparing', 'ready', 'out_for_delivery', 'done', 'cancelled'];
       if (customerNotifiableStatuses.includes(status)) {
@@ -1184,8 +1213,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         return order;
       };
-
-
+
+
+
+
 
       const orderRef = db.collection('orders').doc(orderId);
       const snap = await orderRef.get();
@@ -1201,7 +1232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    
+
     if (req.method === 'POST' && path === '/notifications/token') {
       const payload = req.body as any;
       if (!payload.fcmToken || !payload.role || !payload.userId || !payload.deviceInfo) {
@@ -1253,8 +1284,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    if (req.method === 'GET' && path === '/customers') {
-
+    if (req.method === 'GET' && path === '/customers') {
+
+
+
 
       const snapshot = await db.collection('customers').limit(500).get();
       const list = snapshot.docs.map((doc) => doc.data() as CustomerProfile);
@@ -1273,8 +1306,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ success: false, message: 'Invalid customer profile.' });
         return;
       }
-
-
+
+
+
+
 
       await db.collection('customers').doc(profile.id).set(profile, { merge: true });
       res.status(201).json({ success: true, customer: profile });
@@ -1284,8 +1319,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const verifyMatch = path.match(/^\/customers\/([^/]+)\/verify$/);
     if (req.method === 'PATCH' && verifyMatch) {
       const customerId = decodeURIComponent(verifyMatch[1]);
-
-      
+
+
+
+
 
       const docRef = db.collection('customers').doc(customerId);
       const snap = await docRef.get();
