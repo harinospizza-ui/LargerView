@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
 import { verifyToken } from './cryptoUtils.js';
+import { trackUsage } from './firestoreUsage.js';
 
 const getJWTSecret = (): string => {
   return process.env.JWT_SECRET || 'dev-harinos-pizza-secret-key-32-chars-minimum';
@@ -353,6 +354,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const orderRef = db.collection('orders').doc(decodeURIComponent(orderId));
       const snap = await orderRef.get();
       if (!snap.exists) {
+        await trackUsage({ reads: 1, ordersReads: 1 });
         res.status(404).json({ success: false, message: 'Order not found.' });
         return;
       }
@@ -361,6 +363,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const previousStatus = order.status || 'new';
 
       if (previousStatus === 'cancelled') {
+        await trackUsage({ reads: 1, ordersReads: 1 });
         res.status(400).json({ success: false, message: 'Cancelled orders cannot be modified.' });
         return;
       }
@@ -388,9 +391,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const updated = processOrderStatusUpdate(order);
       await orderRef.set(updated, { merge: true });
 
+      let writeCount = 1;
       if (status === 'cancelled') {
         await logSecurityEvent('ORDER_CANCELLED', caller.username, `Order: ${orderId}, Reason: ${reason}`);
+        writeCount++;
       }
+      
+      await trackUsage({ reads: 1, writes: writeCount, ordersReads: 1 });
       
       // Dispatch FCM notifications
       const customerNotifiableStatuses = ['preparing', 'ready', 'out_for_delivery', 'done', 'cancelled'];
@@ -434,6 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const snap = await orderRef.get();
 
       if (!snap.exists) {
+        await trackUsage({ reads: 1, ordersReads: 1 });
         res.status(404).json({ success: false, message: 'Order not found.' });
         return;
       }
@@ -441,6 +449,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const order = snap.data() as any;
 
       if (req.method === 'GET') {
+        await trackUsage({ reads: 1, ordersReads: 1 });
         if (order.isDeleted) {
           res.status(404).json({ success: false, message: 'Order not found.' });
           return;
@@ -495,6 +504,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         await orderRef.set(updated, { merge: true });
         await logSecurityEvent('ORDER_DELETED', caller.username, `Soft deleted order: ${orderId}`);
+        await trackUsage({ reads: 1, writes: 2, ordersReads: 1 });
         res.json({ success: true, message: 'Order deleted successfully.' });
         return;
       }
@@ -511,36 +521,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
-      const filterOrdersByRole = (ordersList: any[]) => {
-        let result = ordersList;
-        if (caller.role === 'staff') {
-          result = result.filter(o => !o.isDeleted && (caller.outletId ? o.outletId === caller.outletId : true));
-          result = result.map(o => {
-            const sanitized = { ...o };
-            delete sanitized.total;
-            delete sanitized.deliveryFee;
-            delete sanitized.walletAmountRedeemed;
-            delete sanitized.rewardPointsRedeemed;
-            if (Array.isArray(sanitized.items)) {
-              sanitized.items = sanitized.items.map((it: any) => {
-                const cleanIt = { ...it };
-                delete cleanIt.price;
-                delete cleanIt.totalPrice;
-                return cleanIt;
-              });
-            }
-            return sanitized;
-          });
-        } else if (caller.role === 'manager') {
-          result = result.filter(o => !o.isDeleted);
-        }
-        return result;
-      };
+      let queryRef: admin.firestore.Query = db.collection('orders');
+      if (caller.role === 'staff') {
+        // Query active orders only
+        queryRef = queryRef.where('status', 'in', ['new', 'preparing', 'ready', 'out_for_delivery']);
+      } else {
+        // Manager / Admin can query order history desc
+        queryRef = queryRef.orderBy('receivedAt', 'desc');
+      }
 
-      const snapshot = await db.collection('orders').orderBy('receivedAt', 'desc').limit(500).get();
-      const rawOrders = snapshot.docs.map((doc) => doc.data());
-      const filtered = filterOrdersByRole(rawOrders);
-      res.json({ success: true, orders: filtered });
+      // Pagination Limit: default 50, max 100
+      const limitVal = Math.min(Math.max(1, parseInt(req.query.limit as string || '50')), 100);
+      queryRef = queryRef.limit(limitVal);
+
+      let readsCount = 0;
+
+      // StartAfter document ID cursor for Manager/Admin
+      if (req.query.lastVisible && caller.role !== 'staff') {
+        const lastDocRef = db.collection('orders').doc(decodeURIComponent(req.query.lastVisible as string));
+        const lastDoc = await lastDocRef.get();
+        readsCount += 1;
+        if (lastDoc.exists) {
+          queryRef = queryRef.startAfter(lastDoc);
+        }
+      }
+
+      const snapshot = await queryRef.get();
+      readsCount += snapshot.size;
+      await trackUsage({ reads: readsCount, ordersReads: readsCount });
+
+      let rawOrders = snapshot.docs.map((doc) => doc.data());
+
+      // Filter and sanitize locally
+      if (caller.role === 'staff') {
+        rawOrders = rawOrders.filter(o => !o.isDeleted && (caller.outletId ? o.outletId === caller.outletId : true));
+        // Sort locally by receivedAt desc since we didn't specify orderBy in query (to avoid index requirements)
+        rawOrders.sort((a, b) => {
+          const timeA = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
+          const timeB = b.receivedAt ? new Date(b.receivedAt).getTime() : 0;
+          return timeB - timeA;
+        });
+
+        rawOrders = rawOrders.map(o => {
+          const sanitized = { ...o };
+          delete sanitized.total;
+          delete sanitized.deliveryFee;
+          delete sanitized.walletAmountRedeemed;
+          delete sanitized.rewardPointsRedeemed;
+          if (Array.isArray(sanitized.items)) {
+            sanitized.items = sanitized.items.map((it: any) => {
+              const cleanIt = { ...it };
+              delete cleanIt.price;
+              delete cleanIt.totalPrice;
+              return cleanIt;
+            });
+          }
+          return sanitized;
+        });
+      } else if (caller.role === 'manager') {
+        rawOrders = rawOrders.filter(o => !o.isDeleted);
+      }
+
+      res.json({ success: true, orders: rawOrders });
       return;
     }
 
@@ -577,6 +619,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
 
       await db.collection('orders').doc(orderId).set(nextOrder);
+      await trackUsage({ reads: snapshot.size, writes: 1, ordersReads: snapshot.size });
       
       // Send background new order FCM alerts to admin/manager/staff
       void sendNewOrderNotifications(nextOrder).catch((err) => console.error('Error notifying new order:', err));

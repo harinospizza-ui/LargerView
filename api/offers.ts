@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
+import { trackUsage } from './firestoreUsage.js';
 
 const parseServiceAccount = (): admin.ServiceAccount => {
   const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
@@ -84,9 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await batch.commit();
         const seededSnapshot = await db.collection('offers').get();
+        await trackUsage({ reads: snapshot.size + seededSnapshot.size, writes: DEFAULT_OFFERS.length, otherReads: snapshot.size + seededSnapshot.size });
         res.json({ success: true, offers: seededSnapshot.docs.map((doc) => doc.data()) });
         return;
       }
+      await trackUsage({ reads: snapshot.size, otherReads: snapshot.size });
       res.json({ success: true, offers: snapshot.docs.map((doc) => doc.data()) });
       return;
     }
@@ -103,7 +106,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const docRef = db.collection('offers').doc(offer.id);
           batch.set(docRef, offer, { merge: true });
         }
+        // Update menu version
+        const settingsRef = db.collection('settings').doc('app');
+        batch.set(settingsRef, { menuVersion: Date.now().toString() }, { merge: true });
+
         await batch.commit();
+        await trackUsage({ writes: offers.length + 1 });
         res.json({ success: true, count: offers.length });
         return;
       }
@@ -114,6 +122,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       await db.collection('offers').doc(offer.id).set(offer, { merge: true });
+      await db.collection('settings').doc('app').set({ menuVersion: Date.now().toString() }, { merge: true });
+      await trackUsage({ writes: 2 });
       res.json({ success: true });
       return;
     }

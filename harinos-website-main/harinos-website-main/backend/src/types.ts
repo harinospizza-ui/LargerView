@@ -91,6 +91,7 @@ export interface FullOrderPayload {
   walletAmountRedeemed?: number;
   rewardPointsRedeemed?: number;
   rewardPointsEarned?: number;
+  isDeleted?: boolean;
 }
 
 export type AdminRole = 'admin' | 'manager' | 'staff';
@@ -151,6 +152,7 @@ export interface OutletConfig {
 
 export interface AppSettings {
   instagramUrl?: string;
+  menuVersion?: string;
 }
 
 

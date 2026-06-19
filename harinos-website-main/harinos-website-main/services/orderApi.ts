@@ -893,11 +893,22 @@ export const saveSettingsToServer = async (settings: AppSettings): Promise<void>
   if (!apiBase) return;
   const response = await fetch(`${apiBase}/settings`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify(settings),
   });
   if (!response.ok) throw new Error('Failed to save settings.');
 };
+
+export const getFirestoreUsage = async (): Promise<any[]> => {
+  const apiBase = getApiBase();
+  if (!apiBase) return [];
+  const response = await fetch(`${apiBase}/customers?action=usage`, {
+    headers: getAuthHeaders(),
+    cache: 'no-store'
+  });
+  if (!response.ok) throw new Error('Failed to load usage stats.');
+  const data = await response.json();
+  return data.usage || [];
+};
+
 

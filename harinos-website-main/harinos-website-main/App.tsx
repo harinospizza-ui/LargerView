@@ -255,54 +255,57 @@ const App: React.FC = () => {
     fetchConfig();
   }, []);
 
-  // Fetch application settings on startup
+  // Fetch application settings and static data (menu, outlets, offers) on startup with caching
   useEffect(() => {
-    const fetchSettings = async () => {
+    if (!configLoaded) return;
+
+    const loadData = async () => {
       try {
+        // Fetch settings once to get instagramUrl and current menuVersion
         const settings = await getServerSettings();
         if (settings.instagramUrl) {
           setInstagramUrl(settings.instagramUrl);
         }
-      } catch (err) {
-        console.warn('Failed to fetch settings:', err);
-      }
-    };
-    void fetchSettings();
-  }, [configLoaded]);
 
+        const serverVersion = settings.menuVersion || '1.0';
+        const localVersion = localStorage.getItem('cached_menu_version');
 
-  // Request notification permission on app load
-  useEffect(() => {
-    void requestNotificationPermission();
-  }, []);
+        if (localVersion === serverVersion) {
+          const cachedMenu = localStorage.getItem('cached_menu_items');
+          const cachedOutlets = localStorage.getItem('cached_outlets');
+          const cachedOffers = localStorage.getItem('cached_offers');
 
-  // Fetch dynamic menu, outlets, offers and auto-seed if empty
-  useEffect(() => {
-    if (!configLoaded) return;
+          if (cachedMenu && cachedOutlets && cachedOffers) {
+            console.log('Loading menu, outlets, and offers from local storage cache.');
+            setMenuItems(JSON.parse(cachedMenu));
+            setOutlets(JSON.parse(cachedOutlets));
+            setOffers(JSON.parse(cachedOffers));
+            return;
+          }
+        }
 
-    let unsubscribeMenu: (() => void) | null = null;
-    let unsubscribeOutlets: (() => void) | null = null;
-    let unsubscribeOffers: (() => void) | null = null;
-
-    const loadData = async () => {
-      try {
+        console.log('Cache mismatch or empty cache. Loading from server...');
         const items = await getServerMenuItems();
+        let finalMenuItems = [];
         if (items.length === 0) {
           console.log('Seeding database menu_items...');
           await seedMenuItemsToServer(MENU_ITEMS);
-          setMenuItems(extendMenuItemsWithGeneratedSeries(MENU_ITEMS));
+          finalMenuItems = extendMenuItemsWithGeneratedSeries(MENU_ITEMS);
         } else {
-          setMenuItems(extendMenuItemsWithGeneratedSeries(items));
+          finalMenuItems = extendMenuItemsWithGeneratedSeries(items);
         }
+        setMenuItems(finalMenuItems);
 
         const outletList = await getServerOutlets();
+        let finalOutlets = [];
         if (outletList.length === 0) {
           console.log('Seeding database outlets...');
           await seedOutletsToServer(OUTLET_LOCATIONS);
-          setOutlets(OUTLET_LOCATIONS);
+          finalOutlets = OUTLET_LOCATIONS;
         } else {
-          setOutlets(outletList);
+          finalOutlets = outletList;
         }
+        setOutlets(finalOutlets);
 
         const offerList = await getServerOffers();
         const hasSundayDhamaka = offerList.some(o => o.id === 'offer-sunday-dhamaka');
@@ -314,44 +317,25 @@ const App: React.FC = () => {
         } else {
           setOffers(finalOffers);
         }
+
+        // Cache they locally
+        localStorage.setItem('cached_menu_items', JSON.stringify(finalMenuItems));
+        localStorage.setItem('cached_outlets', JSON.stringify(finalOutlets));
+        localStorage.setItem('cached_offers', JSON.stringify(finalOffers));
+        localStorage.setItem('cached_menu_version', serverVersion);
+        console.log('Successfully updated local storage cache to version:', serverVersion);
       } catch (err) {
-        console.error('Failed to load menu/outlets/offers:', err);
+        console.error('Failed to load settings or menu data:', err);
       }
     };
 
-    unsubscribeMenu = subscribeServerMenuItems(
-      (items) => {
-        if (items.length > 0) setMenuItems(extendMenuItemsWithGeneratedSeries(items));
-      },
-      () => undefined
-    );
-
-    unsubscribeOutlets = subscribeServerOutlets(
-      (outlets) => {
-        if (outlets.length > 0) setOutlets(outlets);
-      },
-      () => undefined
-    );
-
-    unsubscribeOffers = subscribeServerOffers(
-      (offers) => {
-        if (offers.length > 0) {
-          const hasSundayDhamaka = offers.some(o => o.id === 'offer-sunday-dhamaka');
-          const finalOffers = hasSundayDhamaka ? offers : [SUNDAY_DHAMAKA_CARD, ...offers];
-          setOffers(finalOffers);
-        }
-      },
-      () => undefined
-    );
-
     loadData();
-
-    return () => {
-      unsubscribeMenu?.();
-      unsubscribeOutlets?.();
-      unsubscribeOffers?.();
-    };
   }, [configLoaded]);
+
+  // Request notification permission on app load
+  useEffect(() => {
+    void requestNotificationPermission();
+  }, []);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const applyAppScreen = useCallback((screen: AppScreen) => {

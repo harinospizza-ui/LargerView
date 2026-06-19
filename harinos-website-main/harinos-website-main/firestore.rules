@@ -54,5 +54,16 @@ service cloud.firestore {
     match /security_logs/{logId} {
       allow read, write, delete: if false;
     }
+
+    // Settings Rules: Read-only for public, writes must go through API (blocked on client SDK)
+    match /settings/{settingsId} {
+      allow read: if true;
+      allow write, delete: if false;
+    }
+
+    // Firestore Usage Log Rules: Block all direct client SDK reads/writes
+    match /firestore_usage/{usageId} {
+      allow read, write, delete: if false;
+    }
   }
 }

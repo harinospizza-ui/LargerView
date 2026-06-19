@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
+import { trackUsage } from './firestoreUsage.js';
 
 const parseServiceAccount = (): admin.ServiceAccount => {
   const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
@@ -875,26 +876,107 @@ const DEFAULT_MENU_ITEMS = [
   {
     "id": "s_hp",
     "name": "Honey Chilli Potato",
-    "description": "Sweet and spicy crispy potato snack.",
-    "price": 100,
-    "category": "Side-Orders",
-    "image": "/images/chillipotato.jpeg",
-    "vegetarian": true,
-    "available": true
+    "available": true,
+    "sizes": [
+      {
+        "label": "Regular",
+        "price": 149
+      }
+    ]
   },
   {
-    "id": "d_cc",
-    "name": "Cold Coffee",
-    "description": "Iced coffee blend.",
-    "price": 70,
-    "category": "Beverages",
-    "image": "/images/coldcoffee.jpeg",
+    "id": "g_vburg",
+    "name": "Veggie Burger",
+    "description": "Crispy vegetable patty in soft buns with fresh lettuce and mayo.",
+    "price": 59,
+    "category": "Sides",
+    "image": "/images/vegburgar.jpeg",
     "vegetarian": true,
     "available": true,
     "sizes": [
       {
         "label": "Regular",
-        "price": 70
+        "price": 59
+      }
+    ]
+  },
+  {
+    "id": "g_tburg",
+    "name": "Tikka Burger",
+    "description": "Paneer tikka spiced patty with fresh veggies and tandoori sauce.",
+    "price": 79,
+    "category": "Sides",
+    "image": "/images/tikkaburgar.jpeg",
+    "vegetarian": true,
+    "available": true,
+    "sizes": [
+      {
+        "label": "Regular",
+        "price": 79
+      }
+    ]
+  },
+  {
+    "id": "g_ff",
+    "name": "French Fries",
+    "description": "Golden salted potato fries.",
+    "price": 80,
+    "category": "Sides",
+    "image": "/images/frenchfries.jpeg",
+    "vegetarian": true,
+    "available": true,
+    "sizes": [
+      {
+        "label": "Regular",
+        "price": 80
+      }
+    ]
+  },
+  {
+    "id": "g_mf",
+    "name": "Masala Fries",
+    "description": "Potato fries tossed in spicy masala blend.",
+    "price": 90,
+    "category": "Sides",
+    "image": "/images/masalafries.jpeg",
+    "vegetarian": true,
+    "available": true,
+    "sizes": [
+      {
+        "label": "Regular",
+        "price": 90
+      }
+    ]
+  },
+  {
+    "id": "d_clc",
+    "name": "Choco Lava Cake",
+    "description": "Delicious chocolate cake with gooey chocolate center.",
+    "price": 99,
+    "category": "Desserts",
+    "image": "/images/chocolava.jpeg",
+    "vegetarian": true,
+    "available": true,
+    "sizes": [
+      {
+        "label": "Regular",
+        "price": 99
+      }
+    ]
+  },
+  {
+    "id": "d_cc",
+    "name": "Cold Coffee",
+    "description": "Chilled smooth coffee drink.",
+    "price": 80,
+    "category": "Beverages",
+    "image": "/images/coldcoffee.jpeg",
+    "vegetarian": true,
+    "available": false,
+    "sizes": [
+      {
+        "label": "Regular",
+        "price": 80
       }
     ]
   },
@@ -936,7 +1018,6 @@ const DEFAULT_MENU_ITEMS = [
   }
 ];
 
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -964,7 +1045,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const docRef = db.collection('menu_items').doc(item.id);
         batch.set(docRef, item, { merge: true });
       }
+      // Update menu version
+      const settingsRef = db.collection('settings').doc('app');
+      batch.set(settingsRef, { menuVersion: Date.now().toString() }, { merge: true });
+
       await batch.commit();
+      await trackUsage({ writes: items.length + 1 });
       res.json({ success: true, count: items.length });
       return;
     }
@@ -983,10 +1069,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await batch.commit();
         const seededSnapshot = await db.collection('menu_items').get();
+        await trackUsage({ reads: snapshot.size + seededSnapshot.size, writes: missingItems.length, menuReads: snapshot.size + seededSnapshot.size });
         res.json({ success: true, menuItems: seededSnapshot.docs.map((doc) => doc.data()) });
         return;
       }
       
+      await trackUsage({ reads: snapshot.size, menuReads: snapshot.size });
       res.json({ success: true, menuItems: snapshot.docs.map((doc) => doc.data()) });
       return;
     }
@@ -999,6 +1087,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       await db.collection('menu_items').doc(item.id).set(item, { merge: true });
+      await db.collection('settings').doc('app').set({ menuVersion: Date.now().toString() }, { merge: true });
+      await trackUsage({ writes: 2 });
       res.json({ success: true });
       return;
     }

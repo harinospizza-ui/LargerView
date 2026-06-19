@@ -2,7 +2,7 @@ import { CustomerProfile, FullOrderPayload, OrderStatus, MenuItem, OutletConfig,
 
 export interface OrderStore {
   name: string;
-  getOrders(): Promise<FullOrderPayload[]>;
+  getOrders(options?: { role?: string; outletId?: string; limit?: number; lastVisible?: string }): Promise<FullOrderPayload[]>;
   saveOrder(order: FullOrderPayload): Promise<void>;
   updateOrderStatus(orderId: string, status: OrderStatus): Promise<void>;
   getCustomers(): Promise<CustomerProfile[]>;

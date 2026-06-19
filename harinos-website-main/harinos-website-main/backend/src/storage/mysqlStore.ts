@@ -118,7 +118,7 @@ const parseJsonColumn = <T,>(value: unknown): T => {
 export const mysqlStore: OrderStore = {
   name: 'mysql',
 
-  async getOrders() {
+  async getOrders(options?: { role?: string; outletId?: string; limit?: number; lastVisible?: string }) {
     await ensureSchema();
     const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM orders ORDER BY received_at DESC');
     return newestOrdersFirst(rows.map((row) => parseJsonColumn<FullOrderPayload>(row.payload)));
@@ -251,6 +251,22 @@ export const mysqlStore: OrderStore = {
       `,
       [item.id, JSON.stringify(item), Boolean(item.available)],
     );
+    // Update menu version
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM settings WHERE id = ?', ['app']);
+    let settings: AppSettings = {};
+    if (rows.length > 0) {
+      settings = parseJsonColumn<AppSettings>(rows[0].payload);
+    }
+    settings.menuVersion = Date.now().toString();
+    await getPool().execute(
+      `
+        INSERT INTO settings (id, payload)
+        VALUES (?, CAST(? AS JSON))
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload)
+      `,
+      ['app', JSON.stringify(settings)],
+    );
   },
 
   async getOutlets() {
@@ -271,6 +287,22 @@ export const mysqlStore: OrderStore = {
       `,
       [outlet.id, JSON.stringify(outlet), Boolean(outlet.enabled)],
     );
+    // Update menu version
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM settings WHERE id = ?', ['app']);
+    let settings: AppSettings = {};
+    if (rows.length > 0) {
+      settings = parseJsonColumn<AppSettings>(rows[0].payload);
+    }
+    settings.menuVersion = Date.now().toString();
+    await getPool().execute(
+      `
+        INSERT INTO settings (id, payload)
+        VALUES (?, CAST(? AS JSON))
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload)
+      `,
+      ['app', JSON.stringify(settings)],
+    );
   },
 
   async getOffers() {
@@ -290,6 +322,22 @@ export const mysqlStore: OrderStore = {
           enabled = VALUES(enabled)
       `,
       [offer.id, JSON.stringify(offer), Boolean(offer.enabled)],
+    );
+    // Update menu version
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>('SELECT payload FROM settings WHERE id = ?', ['app']);
+    let settings: AppSettings = {};
+    if (rows.length > 0) {
+      settings = parseJsonColumn<AppSettings>(rows[0].payload);
+    }
+    settings.menuVersion = Date.now().toString();
+    await getPool().execute(
+      `
+        INSERT INTO settings (id, payload)
+        VALUES (?, CAST(? AS JSON))
+        ON DUPLICATE KEY UPDATE
+          payload = VALUES(payload)
+      `,
+      ['app', JSON.stringify(settings)],
     );
   },
 

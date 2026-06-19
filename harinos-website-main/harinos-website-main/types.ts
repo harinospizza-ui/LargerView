@@ -190,5 +190,7 @@ export interface FCMTokenData {
 
 export interface AppSettings {
   instagramUrl?: string;
+  menuVersion?: string;
 }
+
 

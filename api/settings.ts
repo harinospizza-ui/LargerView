@@ -49,30 +49,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const db = getFirestore();
+
     if (req.method === 'GET') {
+      const docRef = db.collection('settings').doc('app');
+      const snap = await docRef.get();
+      await trackUsage({ reads: 1, otherReads: 1 });
+      
+      if (!snap.exists) {
+        res.json({ success: true, settings: {} });
+        return;
+      }
+      res.json({ success: true, settings: snap.data() });
+      return;
+    }
+
+    if (req.method === 'POST') {
       const caller = authenticateRequest(req);
       if (!caller) {
         res.status(401).json({ success: false, message: 'Unauthorized.' });
         return;
       }
       if (caller.role !== 'admin' && caller.role !== 'manager') {
-        res.status(403).json({ success: false, message: 'Forbidden.' });
+        res.status(403).json({ success: false, message: 'Forbidden. Admin/Manager role required.' });
         return;
       }
-      const snapshot = await db.collection('wallet_transactions').orderBy('createdAt', 'desc').get();
-      await trackUsage({ reads: snapshot.size, walletReads: snapshot.size });
-      res.json({ success: true, transactions: snapshot.docs.map((doc) => doc.data()) });
-      return;
-    }
 
-    if (req.method === 'POST') {
-      const transaction = req.body as any;
-      if (!transaction.id || !transaction.customerId || typeof transaction.amount !== 'number') {
-        res.status(400).json({ success: false, message: 'Invalid transaction payload.' });
-        return;
-      }
-      await db.collection('wallet_transactions').doc(transaction.id).set(transaction, { merge: true });
+      const settings = req.body as any;
+      await db.collection('settings').doc('app').set(settings, { merge: true });
       await trackUsage({ writes: 1 });
+
       res.json({ success: true });
       return;
     }

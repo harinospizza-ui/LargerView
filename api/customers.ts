@@ -1,5 +1,18 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
+import { verifyToken } from './cryptoUtils.js';
+import { trackUsage } from './firestoreUsage.js';
+
+const getJWTSecret = (): string => {
+  return process.env.JWT_SECRET || 'dev-harinos-pizza-secret-key-32-chars-minimum';
+};
+
+const authenticateRequest = (req: VercelRequest): any => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7);
+  return verifyToken(token, getJWTSecret());
+};
 
 const parseServiceAccount = (): admin.ServiceAccount => {
   const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
@@ -49,15 +62,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const customerData = snap.data() as any;
 
-      const allCustomersSnap = await db.collection('customers').where('verified', '==', true).get();
       const cleanPhone = (p: string) => p.replace(/\D/g, '');
       const targetPhone = cleanPhone(customerData.phone);
-      const alreadyVerified = allCustomersSnap.docs.some((docDoc) => {
+
+      // Optimized query: search verified customers with the same raw phone number
+      const phoneQuerySnap = await db.collection('customers')
+        .where('phone', '==', customerData.phone)
+        .where('verified', '==', true)
+        .get();
+
+      // Or with clean phone number if it is stored in database
+      const cleanPhoneQuerySnap = await db.collection('customers')
+        .where('phone', '==', targetPhone)
+        .where('verified', '==', true)
+        .get();
+
+      const combinedDocs = [...phoneQuerySnap.docs, ...cleanPhoneQuerySnap.docs];
+      const alreadyVerified = combinedDocs.some(docDoc => {
         const data = docDoc.data() as any;
         return data.id !== customerId && data.phone && cleanPhone(data.phone) === targetPhone;
       });
 
+      const readsCount = 1 + phoneQuerySnap.size + cleanPhoneQuerySnap.size;
+
       if (alreadyVerified) {
+        await trackUsage({ reads: readsCount, customersReads: readsCount });
         res.status(400).json({ success: false, message: 'This phone number is already verified under another profile.' });
         return;
       }
@@ -69,16 +98,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const customer = { ...customerData, verified: true, referralCode };
       await docRef.set(customer, { merge: true });
+      await trackUsage({ reads: readsCount, writes: 1, customersReads: readsCount });
       res.json({ success: true, customer });
       return;
     }
 
-    // 2. GET single customer, search by phone, or all customers (/api/customers)
+    // 2. GET single customer, search by phone, all customers, or usage stats (/api/customers)
     if (req.method === 'GET') {
       const { customerId, phone } = req.query as { customerId?: string; phone?: string };
+
+      // 2a. Action usage check (Admin only)
+      if (action === 'usage') {
+        const caller = authenticateRequest(req);
+        if (!caller || caller.role !== 'admin') {
+          res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+          return;
+        }
+        const snapshot = await db.collection('firestore_usage').get();
+        const usageData = snapshot.docs.map(doc => ({
+          date: doc.id,
+          ...doc.data()
+        }));
+        usageData.sort((a, b) => b.date.localeCompare(a.date));
+        res.json({ success: true, usage: usageData });
+        return;
+      }
+
       if (customerId) {
         const docRef = db.collection('customers').doc(decodeURIComponent(customerId));
         const snap = await docRef.get();
+        await trackUsage({ reads: 1, customersReads: 1 });
         if (!snap.exists) {
           res.status(404).json({ success: false, message: 'Customer not found.' });
           return;
@@ -86,6 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.json({ success: true, customer: snap.data() });
         return;
       }
+
       if (phone) {
         const rawPhone = decodeURIComponent(phone);
         const cleanPhone = (p: string) => p.replace(/\D/g, '');
@@ -93,15 +143,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // Try querying exactly by the raw input
         let querySnap = await db.collection('customers').where('phone', '==', rawPhone).get();
+        let totalReads = querySnap.size || 1;
         
         // If not found and input is different from cleaned digits, try query by digits
         if (querySnap.empty && targetPhoneDigits && targetPhoneDigits !== rawPhone) {
           querySnap = await db.collection('customers').where('phone', '==', targetPhoneDigits).get();
+          totalReads += querySnap.size || 1;
         }
 
         if (querySnap.empty) {
           // fallback scan
           const snapshot = await db.collection('customers').limit(500).get();
+          totalReads += snapshot.size;
+          await trackUsage({ reads: totalReads, customersReads: totalReads });
           const match = snapshot.docs.find(doc => {
             const data = doc.data() as any;
             return data.phone && cleanPhone(data.phone) === targetPhoneDigits;
@@ -114,11 +168,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
 
+        await trackUsage({ reads: totalReads, customersReads: totalReads });
         res.json({ success: true, customer: querySnap.docs[0].data() });
         return;
       }
 
+      // Restrict GET all customers to Admin / Manager
+      const caller = authenticateRequest(req);
+      if (!caller || (caller.role !== 'admin' && caller.role !== 'manager')) {
+        res.status(403).json({ success: false, message: 'Forbidden. Admin or Manager role required.' });
+        return;
+      }
+
       const snapshot = await db.collection('customers').limit(500).get();
+      await trackUsage({ reads: snapshot.size, customersReads: snapshot.size });
       const list = snapshot.docs.map((doc) => doc.data() as any);
       list.sort((a, b) => {
         const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -147,6 +210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const blockedRef = db.collection('blocked_customers').doc(targetPhone);
         const blockedSnap = await blockedRef.get();
         if (blockedSnap.exists) {
+          await trackUsage({ reads: 1, customersReads: 1 });
           res.status(403).json({ success: false, message: 'This mobile number is permanently blocked.' });
           return;
         }
@@ -154,8 +218,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Search for existing customer
         let existingCustomer: any = null;
         let querySnap = await db.collection('customers').where('phone', '==', phone).get();
+        let totalReads = 1 + (querySnap.size || 1);
         if (querySnap.empty && targetPhone !== phone) {
           querySnap = await db.collection('customers').where('phone', '==', targetPhone).get();
+          totalReads += querySnap.size || 1;
         }
 
         if (!querySnap.empty) {
@@ -163,6 +229,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else {
           // fallback scan
           const snapshot = await db.collection('customers').limit(500).get();
+          totalReads += snapshot.size;
           const match = snapshot.docs.find(doc => {
             const data = doc.data() as any;
             return data.phone && cleanPhone(data.phone) === targetPhone;
@@ -182,6 +249,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             otpExpiry
           }, { merge: true });
 
+          await trackUsage({ reads: totalReads, writes: 1, customersReads: totalReads });
+
           res.json({
             success: true,
             exists: true,
@@ -193,6 +262,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else {
           // Customer does not exist
           if (!isRegistering) {
+            await trackUsage({ reads: totalReads, customersReads: totalReads });
             res.json({
               success: false,
               exists: false,
@@ -222,6 +292,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           };
 
           await db.collection('customers').doc(newCustomerId).set(newCustomer);
+          await trackUsage({ reads: totalReads, writes: 1, customersReads: totalReads });
+
           res.status(201).json({
             success: true,
             exists: false,
@@ -243,6 +315,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const customerDocRef = db.collection('customers').doc(customerId);
         const snap = await customerDocRef.get();
         if (!snap.exists) {
+          await trackUsage({ reads: 1, customersReads: 1 });
           res.status(404).json({ success: false, message: 'Customer not found.' });
           return;
         }
@@ -265,6 +338,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           };
 
           await customerDocRef.set(updatedCustomer, { merge: true });
+          await trackUsage({ reads: 1, writes: 1, customersReads: 1 });
+
           // remove firestoreFieldValue items for JSON response
           delete updatedCustomer.otp;
           delete updatedCustomer.otpExpiry;
@@ -279,6 +354,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
           return;
         } else {
+          await trackUsage({ reads: 1, customersReads: 1 });
           res.status(400).json({ success: false, message: 'Incorrect OTP. Please try again.' });
           return;
         }
@@ -296,7 +372,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const blockedRef = db.collection('blocked_customers').doc(targetPhone);
       const blockedSnap = await blockedRef.get();
+      let writeCount = 1;
       if (blockedSnap.exists) {
+        // Blocked number cannot register or update
+        await trackUsage({ reads: 1, customersReads: 1 });
         res.status(403).json({ success: false, message: 'This mobile number is permanently blocked.' });
         return;
       }
@@ -308,11 +387,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           customerId: profile.id,
           name: profile.name
         });
+        writeCount++;
       } else {
         await blockedRef.delete();
+        writeCount++;
       }
 
       await db.collection('customers').doc(profile.id).set(profile, { merge: true });
+      await trackUsage({ reads: 1, writes: writeCount, customersReads: 1 });
+
       res.status(201).json({ success: true, customer: profile });
       return;
     }
@@ -327,6 +410,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const docRef = db.collection('customers').doc(decodeURIComponent(customerId));
       const snap = await docRef.get();
+      let writeCount = 0;
       if (snap.exists) {
         const customerData = snap.data() as any;
         const cleanPhone = (p: string) => p.replace(/\D/g, '');
@@ -342,8 +426,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // Set status to removed
         await docRef.set({ ...customerData, status: 'removed' }, { merge: true });
+        writeCount += 2;
       }
 
+      await trackUsage({ reads: 1, writes: writeCount, customersReads: 1 });
       res.json({ success: true });
       return;
     }

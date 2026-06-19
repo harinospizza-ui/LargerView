@@ -29,7 +29,7 @@ const writeJson = async (filePath: string, value: unknown): Promise<void> => {
   await writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
 };
 
-export const getStoredOrders = async (): Promise<FullOrderPayload[]> => {
+export const getStoredOrders = async (options?: { role?: string; outletId?: string; limit?: number; lastVisible?: string }): Promise<FullOrderPayload[]> => {
   const orders = await readJson<FullOrderPayload[]>(ordersFile, []);
   return newestOrdersFirst(orders);
 };
@@ -97,6 +97,10 @@ export const getStoredMenuItems = async (): Promise<MenuItem[]> =>
 export const saveStoredMenuItem = async (item: MenuItem): Promise<void> => {
   const items = (await getStoredMenuItems()).filter((existing) => existing.id !== item.id);
   await writeJson(menuItemsFile, [...items, item]);
+
+  const settings = await getStoredSettings();
+  settings.menuVersion = Date.now().toString();
+  await saveStoredSettings(settings);
 };
 
 export const getStoredOutlets = async (): Promise<OutletConfig[]> =>
@@ -105,6 +109,10 @@ export const getStoredOutlets = async (): Promise<OutletConfig[]> =>
 export const saveStoredOutlet = async (outlet: OutletConfig): Promise<void> => {
   const outlets = (await getStoredOutlets()).filter((existing) => existing.id !== outlet.id);
   await writeJson(outletsFile, [...outlets, outlet]);
+
+  const settings = await getStoredSettings();
+  settings.menuVersion = Date.now().toString();
+  await saveStoredSettings(settings);
 };
 
 export const getStoredOffers = async (): Promise<OfferCard[]> =>
@@ -113,6 +121,10 @@ export const getStoredOffers = async (): Promise<OfferCard[]> =>
 export const saveStoredOffer = async (offer: OfferCard): Promise<void> => {
   const offers = (await getStoredOffers()).filter((existing) => existing.id !== offer.id);
   await writeJson(offersFile, [...offers, offer]);
+
+  const settings = await getStoredSettings();
+  settings.menuVersion = Date.now().toString();
+  await saveStoredSettings(settings);
 };
 
 export const getStoredStaffUsers = async (): Promise<AdminUser[]> =>

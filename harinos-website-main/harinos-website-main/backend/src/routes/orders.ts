@@ -60,7 +60,36 @@ router.get('/orders', async (req, res, next) => {
       return;
     }
 
-    const rawOrders = await getOrderStore().getOrders();
+    if (req.query.action === 'usage') {
+      if (caller.role !== 'admin') {
+        res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+        return;
+      }
+      if (getOrderStore().name === 'firebase') {
+        const db = admin.firestore(getFirebaseApp());
+        const snapshot = await db.collection('firestore_usage').get();
+        const usageData = snapshot.docs.map(doc => ({
+          date: doc.id,
+          ...doc.data()
+        }));
+        usageData.sort((a, b) => b.date.localeCompare(a.date));
+        res.json({ success: true, usage: usageData });
+        return;
+      } else {
+        res.json({ success: true, usage: [] });
+        return;
+      }
+    }
+
+    const limitVal = Math.min(Math.max(1, parseInt(req.query.limit as string || '50')), 100);
+    const lastVisible = req.query.lastVisible as string | undefined;
+
+    const rawOrders = await getOrderStore().getOrders({
+      role: caller.role,
+      outletId: caller.outletId,
+      limit: limitVal,
+      lastVisible
+    });
     let result = rawOrders;
 
     if (caller.role === 'staff') {

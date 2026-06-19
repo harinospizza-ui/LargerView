@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
+import { trackUsage } from './firestoreUsage.js';
 
 const parseServiceAccount = (): admin.ServiceAccount => {
   const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
@@ -64,9 +65,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await batch.commit();
         const seededSnapshot = await db.collection('outlets').get();
+        await trackUsage({ reads: snapshot.size + seededSnapshot.size, writes: DEFAULT_OUTLETS.length, otherReads: snapshot.size + seededSnapshot.size });
         res.json({ success: true, outlets: seededSnapshot.docs.map((doc) => doc.data()) });
         return;
       }
+      await trackUsage({ reads: snapshot.size, otherReads: snapshot.size });
       res.json({ success: true, outlets: snapshot.docs.map((doc) => doc.data()) });
       return;
     }
@@ -83,7 +86,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const docRef = db.collection('outlets').doc(outlet.id);
           batch.set(docRef, outlet, { merge: true });
         }
+        // Update menu version
+        const settingsRef = db.collection('settings').doc('app');
+        batch.set(settingsRef, { menuVersion: Date.now().toString() }, { merge: true });
+
         await batch.commit();
+        await trackUsage({ writes: outlets.length + 1 });
         res.json({ success: true, count: outlets.length });
         return;
       }
@@ -94,6 +102,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       await db.collection('outlets').doc(outlet.id).set(outlet, { merge: true });
+      await db.collection('settings').doc('app').set({ menuVersion: Date.now().toString() }, { merge: true });
+      await trackUsage({ writes: 2 });
       res.json({ success: true });
       return;
     }
@@ -105,6 +115,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       await db.collection('outlets').doc(decodeURIComponent(outletId)).delete();
+      await db.collection('settings').doc('app').set({ menuVersion: Date.now().toString() }, { merge: true });
+      await trackUsage({ writes: 1, deletes: 1 });
       res.json({ success: true });
       return;
     }
