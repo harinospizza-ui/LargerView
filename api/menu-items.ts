@@ -157,9 +157,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  const { action } = req.query as { action?: string };
+
   try {
     const db = getFirestore();
 
+    // 1. POST seed (/api/menu-items/seed)
+    if (req.method === 'POST' && action === 'seed') {
+      const items = req.body as any[];
+      if (!Array.isArray(items)) {
+        res.status(400).json({ success: false, message: 'Payload must be an array of menu items.' });
+        return;
+      }
+      const batch = db.batch();
+      for (const item of items) {
+        const docRef = db.collection('menu_items').doc(item.id);
+        batch.set(docRef, item, { merge: true });
+      }
+      await batch.commit();
+      res.json({ success: true, count: items.length });
+      return;
+    }
+
+    // 2. GET all menu items (/api/menu-items)
     if (req.method === 'GET') {
       const snapshot = await db.collection('menu_items').get();
       if (snapshot.empty) {
@@ -177,6 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    // 3. POST save item (/api/menu-items)
     if (req.method === 'POST') {
       const item = req.body as any;
       if (!item.id || !item.name) {

@@ -52,6 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const db = getFirestore();
+    const { action } = req.query as { action?: string };
 
     if (req.method === 'GET') {
       const snapshot = await db.collection('outlets').get();
@@ -71,6 +72,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'POST') {
+      if (action === 'seed') {
+        const outlets = req.body as any[];
+        if (!Array.isArray(outlets)) {
+          res.status(400).json({ success: false, message: 'Payload must be an array of outlets.' });
+          return;
+        }
+        const batch = db.batch();
+        for (const outlet of outlets) {
+          const docRef = db.collection('outlets').doc(outlet.id);
+          batch.set(docRef, outlet, { merge: true });
+        }
+        await batch.commit();
+        res.json({ success: true, count: outlets.length });
+        return;
+      }
+
       const outlet = req.body as any;
       if (!outlet.id || !outlet.name) {
         res.status(400).json({ success: false, message: 'Invalid outlet payload.' });

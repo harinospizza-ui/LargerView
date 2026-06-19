@@ -1029,6 +1029,7 @@ const App: React.FC = () => {
     const orderPayload = {
       items: orderItems,
       total: grandTotal,
+      date: new Date().toLocaleString(),
       orderType,
       deliveryFee: finalDeliveryFee,
       outletId: outlet.id,

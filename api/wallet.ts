@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
-import { verifyToken } from '../cryptoUtils.js';
+import { verifyToken } from './cryptoUtils.js';
 
 const getJWTSecret = (): string => {
   return process.env.JWT_SECRET || 'dev-harinos-pizza-secret-key-32-chars-minimum';

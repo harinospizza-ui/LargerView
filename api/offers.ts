@@ -72,6 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const db = getFirestore();
+    const { action } = req.query as { action?: string };
 
     if (req.method === 'GET') {
       const snapshot = await db.collection('offers').get();
@@ -91,6 +92,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'POST') {
+      if (action === 'seed') {
+        const offers = req.body as any[];
+        if (!Array.isArray(offers)) {
+          res.status(400).json({ success: false, message: 'Payload must be an array of offers.' });
+          return;
+        }
+        const batch = db.batch();
+        for (const offer of offers) {
+          const docRef = db.collection('offers').doc(offer.id);
+          batch.set(docRef, offer, { merge: true });
+        }
+        await batch.commit();
+        res.json({ success: true, count: offers.length });
+        return;
+      }
+
       const offer = req.body as any;
       if (!offer.id || !offer.offerTitle) {
         res.status(400).json({ success: false, message: 'Invalid offer payload.' });

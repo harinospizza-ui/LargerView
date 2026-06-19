@@ -103,6 +103,17 @@ export interface Order {
   walletAmountRedeemed?: number;
   rewardPointsRedeemed?: number;
   rewardPointsEarned?: number;
+  isDeleted?: boolean;
+  cancelledBy?: string;
+  cancellationReason?: string;
+  auditTrail?: Array<{
+    timestamp: string;
+    updatedBy: string;
+    action: string;
+    previousStatus?: string;
+    newStatus?: string;
+    reason?: string;
+  }>;
 }
 
 export interface Notification {
