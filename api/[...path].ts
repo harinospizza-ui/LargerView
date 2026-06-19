@@ -297,171 +297,37 @@ const DEFAULT_MENU_ITEMS: MenuItem[] = [
   }
 ];
 
-const DB_FILE = path.join('/tmp', 'harinos_db.json');
 
-const loadLocalDb = () => {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    }
-  } catch (err) {
-    console.error('Failed to read local DB:', err);
-  }
-  return {
-    orders: [],
-    customers: [
-      { id: 'cust_anuj', name: 'Anuj', phone: '7505226934', loginMethod: 'phone', verified: true, createdAt: new Date().toISOString() }
-    ],
-    menu_items: DEFAULT_MENU_ITEMS,
-    outlets: DEFAULT_OUTLETS,
-    offers: DEFAULT_OFFERS,
-    wallet_transactions: [],
-    staff_users: DEFAULT_STAFF,
-  };
-};
+;
 
-const saveLocalDb = (data: any) => {
-  try {
-    const dir = path.dirname(DB_FILE);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Failed to write local DB:', err);
-  }
-};
+;
 
-const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'harinos-12902';
-const REST_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
 let isUsingRestDb = false;
 
-const getValue = (valObj: any): any => {
-  if (!valObj) return null;
-  if ('stringValue' in valObj) return valObj.stringValue;
-  if ('integerValue' in valObj) return parseInt(valObj.integerValue, 10);
-  if ('doubleValue' in valObj) return parseFloat(valObj.doubleValue);
-  if ('booleanValue' in valObj) return valObj.booleanValue;
-  if ('nullValue' in valObj) return null;
-  if ('arrayValue' in valObj) {
-    const values = valObj.arrayValue.values || [];
-    return values.map((v: any) => getValue(v));
-  }
-  if ('mapValue' in valObj) {
-    const fields = valObj.mapValue.fields || {};
-    const result: any = {};
-    for (const [k, v] of Object.entries(fields)) {
-      result[k] = getValue(v);
-    }
-    return result;
-  }
-  return undefined;
-};
+;
 
-const mapFromFirestore = (doc: any): any => {
-  if (!doc || !doc.fields) return null;
-  const result: any = {};
-  for (const [key, value] of Object.entries(doc.fields)) {
-    result[key] = getValue(value);
-  }
-  if (doc.name) {
-    const parts = doc.name.split('/');
-    result.id = parts[parts.length - 1];
-  }
-  return result;
-};
+;
 
-const toValue = (val: any): any => {
-  if (val === null || val === undefined) return { nullValue: null };
-  if (typeof val === 'string') return { stringValue: val };
-  if (typeof val === 'boolean') return { booleanValue: val };
-  if (typeof val === 'number') {
-    if (Number.isInteger(val)) {
-      return { integerValue: val.toString() };
-    }
-    return { doubleValue: val };
-  }
-  if (Array.isArray(val)) {
-    return { arrayValue: { values: val.map(v => toValue(v)).filter(v => v !== undefined) } };
-  }
-  if (typeof val === 'object') {
-    const fields: any = {};
-    for (const [k, v] of Object.entries(val)) {
-      const fieldVal = toValue(v);
-      if (fieldVal !== undefined) {
-        fields[k] = fieldVal;
-      }
-    }
-    return { mapValue: { fields } };
-  }
-  return undefined;
-};
+;
 
-const mapToFirestore = (obj: any): any => {
-  const fields: any = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (key === 'id') continue;
-    const val = toValue(value);
-    if (val !== undefined) {
-      fields[key] = val;
-    }
-  }
-  return { fields };
-};
+;
 
-const restGetCollection = async (collectionId: string): Promise<any[]> => {
-  const url = `${REST_BASE}/${collectionId}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    if (res.status === 404) return [];
-    throw new Error(`REST fetch collection failed with status ${res.status}`);
-  }
-  const data = await res.json();
-  const docs = data.documents || [];
-  return docs.map((d: any) => mapFromFirestore(d)).filter((d: any) => d !== null);
-};
+;
 
-const restGetDocument = async (collectionId: string, documentId: string): Promise<any | null> => {
-  const url = `${REST_BASE}/${collectionId}/${encodeURIComponent(documentId)}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    if (res.status === 404) return null;
-    throw new Error(`REST fetch document failed with status ${res.status}`);
-  }
-  const data = await res.json();
-  return mapFromFirestore(data);
-};
+;
 
-const restSetDocument = async (collectionId: string, documentId: string, data: any): Promise<void> => {
-  const url = `${REST_BASE}/${collectionId}/${encodeURIComponent(documentId)}`;
-  const firestoreData = mapToFirestore(data);
-  const res = await fetch(url, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(firestoreData),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`REST set document failed with status ${res.status}: ${errText}`);
-  }
-};
+;
 
-const getFirestore = (): admin.firestore.Firestore | null => {
-  try {
-    if (!admin.apps.length) {
-      const serviceAccount = parseServiceAccount();
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        projectId: process.env.FIREBASE_PROJECT_ID || 'harinos-12902',
-      });
-    }
-    return admin.firestore();
-  } catch (error) {
-    console.warn('Firebase admin initialization failed, falling back to REST/local DB:', error);
-    isUsingRestDb = true;
-    return null;
+const getFirestore = (): admin.firestore.Firestore => {
+  if (!admin.apps.length) {
+    const serviceAccount = parseServiceAccount();
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: process.env.FIREBASE_PROJECT_ID || 'harinos-12902',
+    });
   }
+  return admin.firestore();
 };
 
 const sendError = (res: VercelResponse, error: unknown) => {
@@ -578,60 +444,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           user: { role: user.role, username: user.username, outletId: user.outletId },
         });
       };
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          let users = await restGetCollection('staff_users');
-          if (users.length === 0) {
-            for (const user of DEFAULT_STAFF) {
-              const hashedUser = { ...user, password: hashPassword(user.password) };
-              await restSetDocument('staff_users', user.username, hashedUser);
-            }
-            users = await restGetCollection('staff_users');
-          }
-          const user = users.find((u: any) => u.username === username);
-          if (!user) {
-            await logSecurityEvent('FAILED_LOGIN', username, 'Non-existent user attempt', clientIp);
-            res.status(401).json({ success: false, message: 'Invalid username or password.' });
-            return;
-          }
-          await handleUserAuth(user, async (hashed) => {
-            user.password = hashed;
-            await restSetDocument('staff_users', username, user);
-          });
-          return;
-        } catch (err) {
-          console.warn('REST auth login failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        if (!localDb.staff_users || localDb.staff_users.length === 0) {
-          localDb.staff_users = [];
-          for (const user of DEFAULT_STAFF) {
-            localDb.staff_users.push({ ...user, password: hashPassword(user.password) });
-          }
-          saveLocalDb(localDb);
-        }
-        
-        const user = localDb.staff_users.find((u: any) => u.username === username);
-        if (!user) {
-          await logSecurityEvent('FAILED_LOGIN', username, 'Non-existent user attempt', clientIp);
-          res.status(401).json({ success: false, message: 'Invalid username or password.' });
-          return;
-        }
-        await handleUserAuth(user, async (hashed) => {
-          const idx = localDb.staff_users.findIndex((u: any) => u.username === username);
-          localDb.staff_users[idx].password = hashed;
-          saveLocalDb(localDb);
-        });
-        return;
-      }
-
-      const staffRef = db!.collection('staff_users');
+      const staffRef = db.collection('staff_users');
       const snapshot = await staffRef.get();
       
       if (snapshot.empty) {
@@ -670,41 +486,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const hashed = hashPassword(newPassword);
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          const user = await restGetDocument('staff_users', username);
-          if (!user) {
-            res.status(404).json({ success: false, message: 'Staff user not found.' });
-            return;
-          }
-          user.password = hashed;
-          await restSetDocument('staff_users', username, user);
-          await logSecurityEvent('PASSWORD_CHANGED', caller.username, `Target: ${username}`);
-          res.json({ success: true, message: 'Password updated successfully.' });
-          return;
-        } catch (err) {
-          console.warn('REST change password failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const userIdx = localDb.staff_users.findIndex((u: any) => u.username === username);
-        if (userIdx === -1) {
-          res.status(404).json({ success: false, message: 'Staff user not found.' });
-          return;
-        }
-        localDb.staff_users[userIdx].password = hashed;
-        saveLocalDb(localDb);
-        await logSecurityEvent('PASSWORD_CHANGED', caller.username, `Target: ${username}`);
-        res.json({ success: true, message: 'Password updated successfully.' });
-        return;
-      }
-
-      const staffRef = db!.collection('staff_users');
+      const staffRef = db.collection('staff_users');
       const docRef = staffRef.doc(username);
       const docSnap = await docRef.get();
       if (!docSnap.exists) {
@@ -717,92 +502,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    if (req.method === 'GET' && path === '/menu-items') {
-      if (isUsingRestDb) {
-        try {
-          const items = await restGetCollection('menu_items');
-          res.json({ success: true, menuItems: items });
-          return;
-        } catch (err) {
-          console.warn('REST get menu items failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
+    if (req.method === 'GET' && path === '/menu-items') {
+
 
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        res.json({ success: true, menuItems: localDb.menu_items });
-        return;
-      }
-
-      const snapshot = await db!.collection('menu_items').get();
+      const snapshot = await db.collection('menu_items').get();
       res.json({ success: true, menuItems: snapshot.docs.map((doc) => doc.data()) });
       return;
     }
 
     if (req.method === 'POST' && path === '/menu-items') {
       const item = req.body as MenuItem;
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          await restSetDocument('menu_items', item.id, item);
-          res.json({ success: true });
-          return;
-        } catch (err) {
-          console.warn('REST save menu item failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.menu_items.findIndex((i: any) => i.id === item.id);
-        if (idx >= 0) localDb.menu_items[idx] = { ...localDb.menu_items[idx], ...item };
-        else localDb.menu_items.push(item);
-        saveLocalDb(localDb);
-        res.json({ success: true });
-        return;
-      }
-
-      await db!.collection('menu_items').doc(item.id).set(item, { merge: true });
+      await db.collection('menu_items').doc(item.id).set(item, { merge: true });
       res.json({ success: true });
       return;
     }
 
     if (req.method === 'POST' && path === '/menu-items/seed') {
       const items = req.body as MenuItem[];
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          for (const item of items) {
-            await restSetDocument('menu_items', item.id, item);
-          }
-          res.json({ success: true, count: items.length });
-          return;
-        } catch (err) {
-          console.warn('REST seed menu items failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        for (const item of items) {
-          const idx = localDb.menu_items.findIndex((i: any) => i.id === item.id);
-          if (idx >= 0) localDb.menu_items[idx] = { ...localDb.menu_items[idx], ...item };
-          else localDb.menu_items.push(item);
-        }
-        saveLocalDb(localDb);
-        res.json({ success: true, count: items.length });
-        return;
-      }
-
-      const batch = db!.batch();
+      const batch = db.batch();
       for (const item of items) {
-        const docRef = db!.collection('menu_items').doc(item.id);
+        const docRef = db.collection('menu_items').doc(item.id);
         batch.set(docRef, item, { merge: true });
       }
       await batch.commit();
@@ -820,32 +545,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(403).json({ success: false, message: 'Forbidden.' });
         return;
       }
+
+
 
-      if (isUsingRestDb) {
-        try {
-          const txs = await restGetCollection('wallet_transactions');
-          const sorted = txs.sort(
-            (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-          res.json({ success: true, transactions: sorted });
-          return;
-        } catch (err) {
-          console.warn('REST get transactions failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const sorted = [...localDb.wallet_transactions].sort(
-          (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-        res.json({ success: true, transactions: sorted });
-        return;
-      }
-
-      const snapshot = await db!.collection('wallet_transactions').orderBy('createdAt', 'desc').get();
+      const snapshot = await db.collection('wallet_transactions').orderBy('createdAt', 'desc').get();
       res.json({ success: true, transactions: snapshot.docs.map((doc) => doc.data()) });
       return;
     }
@@ -862,120 +565,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const transaction = req.body as WalletTransaction;
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          await restSetDocument('wallet_transactions', transaction.id, transaction);
-          res.json({ success: true });
-          return;
-        } catch (err) {
-          console.warn('REST save transaction failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.wallet_transactions.findIndex((t: any) => t.id === transaction.id);
-        if (idx >= 0) localDb.wallet_transactions[idx] = { ...localDb.wallet_transactions[idx], ...transaction };
-        else localDb.wallet_transactions.push(transaction);
-        saveLocalDb(localDb);
-        res.json({ success: true });
-        return;
-      }
-
-      await db!.collection('wallet_transactions').doc(transaction.id).set(transaction, { merge: true });
+      await db.collection('wallet_transactions').doc(transaction.id).set(transaction, { merge: true });
       res.json({ success: true });
       return;
     }
 
-    if (req.method === 'GET' && path === '/outlets') {
-      if (isUsingRestDb) {
-        try {
-          const outlets = await restGetCollection('outlets');
-          res.json({ success: true, outlets });
-          return;
-        } catch (err) {
-          console.warn('REST get outlets failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
+    if (req.method === 'GET' && path === '/outlets') {
+
 
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        res.json({ success: true, outlets: localDb.outlets });
-        return;
-      }
-
-      const snapshot = await db!.collection('outlets').get();
+      const snapshot = await db.collection('outlets').get();
       res.json({ success: true, outlets: snapshot.docs.map((doc) => doc.data()) });
       return;
     }
 
     if (req.method === 'POST' && path === '/outlets') {
       const outlet = req.body as OutletConfig;
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          await restSetDocument('outlets', outlet.id, outlet);
-          res.json({ success: true });
-          return;
-        } catch (err) {
-          console.warn('REST save outlet failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.outlets.findIndex((o: any) => o.id === outlet.id);
-        if (idx >= 0) localDb.outlets[idx] = { ...localDb.outlets[idx], ...outlet };
-        else localDb.outlets.push(outlet);
-        saveLocalDb(localDb);
-        res.json({ success: true });
-        return;
-      }
-
-      await db!.collection('outlets').doc(outlet.id).set(outlet, { merge: true });
+      await db.collection('outlets').doc(outlet.id).set(outlet, { merge: true });
       res.json({ success: true });
       return;
     }
 
     if (req.method === 'POST' && path === '/outlets/seed') {
       const outlets = req.body as OutletConfig[];
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          for (const outlet of outlets) {
-            await restSetDocument('outlets', outlet.id, outlet);
-          }
-          res.json({ success: true, count: outlets.length });
-          return;
-        } catch (err) {
-          console.warn('REST seed outlets failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        for (const outlet of outlets) {
-          const idx = localDb.outlets.findIndex((o: any) => o.id === outlet.id);
-          if (idx >= 0) localDb.outlets[idx] = { ...localDb.outlets[idx], ...outlet };
-          else localDb.outlets.push(outlet);
-        }
-        saveLocalDb(localDb);
-        res.json({ success: true, count: outlets.length });
-        return;
-      }
-
-      const batch = db!.batch();
+      const batch = db.batch();
       for (const outlet of outlets) {
-        const docRef = db!.collection('outlets').doc(outlet.id);
+        const docRef = db.collection('outlets').doc(outlet.id);
         batch.set(docRef, outlet, { merge: true });
       }
       await batch.commit();
@@ -983,92 +606,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    if (req.method === 'GET' && path === '/offers') {
-      if (isUsingRestDb) {
-        try {
-          const offers = await restGetCollection('offers');
-          res.json({ success: true, offers });
-          return;
-        } catch (err) {
-          console.warn('REST get offers failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
+    if (req.method === 'GET' && path === '/offers') {
+
 
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        res.json({ success: true, offers: localDb.offers });
-        return;
-      }
-
-      const snapshot = await db!.collection('offers').get();
+      const snapshot = await db.collection('offers').get();
       res.json({ success: true, offers: snapshot.docs.map((doc) => doc.data()) });
       return;
     }
 
     if (req.method === 'POST' && path === '/offers') {
       const offer = req.body as OfferCard;
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          await restSetDocument('offers', offer.id, offer);
-          res.json({ success: true });
-          return;
-        } catch (err) {
-          console.warn('REST save offer failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.offers.findIndex((o: any) => o.id === offer.id);
-        if (idx >= 0) localDb.offers[idx] = { ...localDb.offers[idx], ...offer };
-        else localDb.offers.push(offer);
-        saveLocalDb(localDb);
-        res.json({ success: true });
-        return;
-      }
-
-      await db!.collection('offers').doc(offer.id).set(offer, { merge: true });
+      await db.collection('offers').doc(offer.id).set(offer, { merge: true });
       res.json({ success: true });
       return;
     }
 
     if (req.method === 'POST' && path === '/offers/seed') {
       const offers = req.body as OfferCard[];
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          for (const offer of offers) {
-            await restSetDocument('offers', offer.id, offer);
-          }
-          res.json({ success: true, count: offers.length });
-          return;
-        } catch (err) {
-          console.warn('REST seed offers failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        for (const offer of offers) {
-          const idx = localDb.offers.findIndex((o: any) => o.id === offer.id);
-          if (idx >= 0) localDb.offers[idx] = { ...localDb.offers[idx], ...offer };
-          else localDb.offers.push(offer);
-        }
-        saveLocalDb(localDb);
-        res.json({ success: true, count: offers.length });
-        return;
-      }
-
-      const batch = db!.batch();
+      const batch = db.batch();
       for (const offer of offers) {
-        const docRef = db!.collection('offers').doc(offer.id);
+        const docRef = db.collection('offers').doc(offer.id);
         batch.set(docRef, offer, { merge: true });
       }
       await batch.commit();
@@ -1093,34 +656,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Admin can see everything including soft deleted
         return result;
       };
+
+
 
-      if (isUsingRestDb) {
-        try {
-          const orders = await restGetCollection('orders');
-          const filtered = filterOrdersByRole(orders);
-          const sorted = filtered.sort(
-            (a: any, b: any) => new Date(b.receivedAt ?? b.date).getTime() - new Date(a.receivedAt ?? a.date).getTime()
-          );
-          res.json({ success: true, orders: sorted });
-          return;
-        } catch (err) {
-          console.warn('REST get orders failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const filtered = filterOrdersByRole(localDb.orders);
-        const sorted = [...filtered].sort(
-          (a: any, b: any) => new Date(b.receivedAt ?? b.date).getTime() - new Date(a.receivedAt ?? a.date).getTime()
-        );
-        res.json({ success: true, orders: sorted });
-        return;
-      }
-
-      const snapshot = await db!.collection('orders').orderBy('receivedAt', 'desc').limit(500).get();
+      const snapshot = await db.collection('orders').orderBy('receivedAt', 'desc').limit(500).get();
       const rawOrders = snapshot.docs.map((doc) => doc.data());
       const filtered = filterOrdersByRole(rawOrders);
       res.json({ success: true, orders: filtered });
@@ -1139,30 +678,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         receivedAt: order.receivedAt ?? new Date().toISOString(),
         status: order.status ?? 'new',
       };
+
+
 
-      if (isUsingRestDb) {
-        try {
-          await restSetDocument('orders', nextOrder.id, nextOrder);
-          res.status(201).json({ success: true, orderId: nextOrder.id });
-          return;
-        } catch (err) {
-          console.warn('REST save order failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.orders.findIndex((o: any) => o.id === nextOrder.id);
-        if (idx >= 0) localDb.orders[idx] = { ...localDb.orders[idx], ...nextOrder };
-        else localDb.orders.push(nextOrder);
-        saveLocalDb(localDb);
-        res.status(201).json({ success: true, orderId: nextOrder.id });
-        return;
-      }
-
-      await db!.collection('orders').doc(nextOrder.id).set(nextOrder, { merge: true });
+      await db.collection('orders').doc(nextOrder.id).set(nextOrder, { merge: true });
       res.status(201).json({ success: true, orderId: nextOrder.id });
       return;
     }
@@ -1172,35 +691,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (req.method === 'GET' && getOrderMatch) {
       const orderId = decodeURIComponent(getOrderMatch[1]);
-      
-      if (isUsingRestDb) {
-        try {
-          const order = await restGetDocument('orders', orderId);
-          if (order && !order.isDeleted) {
-            res.json({ success: true, order });
-            return;
-          }
-          res.status(404).json({ success: false, message: 'Order not found.' });
-          return;
-        } catch (err) {
-          console.warn('REST get order by id failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
+      
+
 
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const order = localDb.orders.find((o: any) => o.id === orderId && !o.isDeleted);
-        if (order) {
-          res.json({ success: true, order });
-          return;
-        }
-        res.status(404).json({ success: false, message: 'Order not found.' });
-        return;
-      }
-
-      const snap = await db!.collection('orders').doc(orderId).get();
+      const snap = await db.collection('orders').doc(orderId).get();
       if (!snap.exists) {
         res.status(404).json({ success: false, message: 'Order not found.' });
         return;
@@ -1253,46 +747,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         return order;
       };
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          const order = await restGetDocument('orders', orderId);
-          if (order) {
-            const updated = processOrderStatusUpdate(order);
-            await restSetDocument('orders', orderId, updated);
-            if (status === 'cancelled') {
-              await logSecurityEvent('ORDER_CANCELLED', caller.username, `Order: ${orderId}, Reason: ${reason}`);
-            }
-            res.json({ success: true });
-            return;
-          }
-          res.status(404).json({ success: false, message: 'Order not found.' });
-          return;
-        } catch (err) {
-          console.warn('REST update order status failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.orders.findIndex((o: any) => o.id === orderId);
-        if (idx >= 0) {
-          const updated = processOrderStatusUpdate(localDb.orders[idx]);
-          localDb.orders[idx] = updated;
-          saveLocalDb(localDb);
-          if (status === 'cancelled') {
-            await logSecurityEvent('ORDER_CANCELLED', caller.username, `Order: ${orderId}, Reason: ${reason}`);
-          }
-          res.json({ success: true });
-          return;
-        }
-        res.status(404).json({ success: false, message: 'Order not found.' });
-        return;
-      }
-
-      const orderRef = db!.collection('orders').doc(orderId);
+      const orderRef = db.collection('orders').doc(orderId);
       const snap = await orderRef.get();
       if (!snap.exists) {
         res.status(404).json({ success: false, message: 'Order not found.' });
@@ -1335,42 +793,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         return order;
       };
+
+
 
-      if (isUsingRestDb) {
-        try {
-          const order = await restGetDocument('orders', orderId);
-          if (order) {
-            const updated = processOrderSoftDelete(order);
-            await restSetDocument('orders', orderId, updated);
-            await logSecurityEvent('ORDER_DELETED', caller.username, `Soft deleted order: ${orderId}`);
-            res.json({ success: true, message: 'Order deleted successfully.' });
-            return;
-          }
-          res.status(404).json({ success: false, message: 'Order not found.' });
-          return;
-        } catch (err) {
-          console.warn('REST delete order failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.orders.findIndex((o: any) => o.id === orderId);
-        if (idx >= 0) {
-          const updated = processOrderSoftDelete(localDb.orders[idx]);
-          localDb.orders[idx] = updated;
-          saveLocalDb(localDb);
-          await logSecurityEvent('ORDER_DELETED', caller.username, `Soft deleted order: ${orderId}`);
-          res.json({ success: true, message: 'Order deleted successfully.' });
-          return;
-        }
-        res.status(404).json({ success: false, message: 'Order not found.' });
-        return;
-      }
-
-      const orderRef = db!.collection('orders').doc(orderId);
+      const orderRef = db.collection('orders').doc(orderId);
       const snap = await orderRef.get();
       if (!snap.exists) {
         res.status(404).json({ success: false, message: 'Order not found.' });
@@ -1384,36 +810,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    if (req.method === 'GET' && path === '/customers') {
-      if (isUsingRestDb) {
-        try {
-          const customers = await restGetCollection('customers');
-          const sorted = customers.sort((a: any, b: any) => {
-            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return timeB - timeA;
-          });
-          res.json({ success: true, customers: sorted });
-          return;
-        } catch (err) {
-          console.warn('REST get customers failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
+    if (req.method === 'GET' && path === '/customers') {
+
 
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const sorted = [...localDb.customers].sort((a: any, b: any) => {
-          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return timeB - timeA;
-        });
-        res.json({ success: true, customers: sorted });
-        return;
-      }
-
-      const snapshot = await db!.collection('customers').limit(500).get();
+      const snapshot = await db.collection('customers').limit(500).get();
       const list = snapshot.docs.map((doc) => doc.data() as CustomerProfile);
       list.sort((a, b) => {
         const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -1430,30 +830,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ success: false, message: 'Invalid customer profile.' });
         return;
       }
+
+
 
-      if (isUsingRestDb) {
-        try {
-          await restSetDocument('customers', profile.id, profile);
-          res.status(201).json({ success: true, customer: profile });
-          return;
-        } catch (err) {
-          console.warn('REST save customer failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.customers.findIndex((c: any) => c.id === profile.id);
-        if (idx >= 0) localDb.customers[idx] = { ...localDb.customers[idx], ...profile };
-        else localDb.customers.push(profile as CustomerProfile);
-        saveLocalDb(localDb);
-        res.status(201).json({ success: true, customer: profile });
-        return;
-      }
-
-      await db!.collection('customers').doc(profile.id).set(profile, { merge: true });
+      await db.collection('customers').doc(profile.id).set(profile, { merge: true });
       res.status(201).json({ success: true, customer: profile });
       return;
     }
@@ -1461,76 +841,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const verifyMatch = path.match(/^\/customers\/([^/]+)\/verify$/);
     if (req.method === 'PATCH' && verifyMatch) {
       const customerId = decodeURIComponent(verifyMatch[1]);
+
+      
 
-      if (isUsingRestDb) {
-        try {
-          const customerData = await restGetDocument('customers', customerId);
-          if (!customerData) {
-            res.status(404).json({ success: false, message: 'Customer not found.' });
-            return;
-          }
-          
-          const customers = await restGetCollection('customers');
-          const cleanPhone = (p: string) => p.replace(/\D/g, '');
-          const targetPhone = cleanPhone(customerData.phone);
-          const alreadyVerified = customers.some((c: any) => {
-            return c.verified && c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone;
-          });
-
-          if (alreadyVerified) {
-            res.status(400).json({ success: false, message: 'This phone number is already verified under another profile.' });
-            return;
-          }
-
-          const generateReferralCode = () => {
-            return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
-          };
-          const referralCode = customerData.referralCode ?? generateReferralCode();
-
-          const customer = { ...customerData, verified: true, referralCode };
-          await restSetDocument('customers', customerId, customer);
-          res.json({ success: true, customer });
-          return;
-        } catch (err) {
-          console.warn('REST verify customer failed, falling back:', err);
-          isUsingRestDb = false;
-          isUsingMemoryDb = true;
-        }
-      }
-      
-      if (isUsingMemoryDb) {
-        const localDb = loadLocalDb();
-        const idx = localDb.customers.findIndex((c: any) => c.id === customerId);
-        if (idx === -1) {
-          res.status(404).json({ success: false, message: 'Customer not found.' });
-          return;
-        }
-        
-        const customerData = localDb.customers[idx];
-        const cleanPhone = (p: string) => p.replace(/\D/g, '');
-        const targetPhone = cleanPhone(customerData.phone);
-        const alreadyVerified = localDb.customers.some((c: any) => {
-          return c.verified && c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone;
-        });
-
-        if (alreadyVerified) {
-          res.status(400).json({ success: false, message: 'This phone number is already verified under another profile.' });
-          return;
-        }
-
-        const generateReferralCode = () => {
-          return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
-        };
-        const referralCode = customerData.referralCode ?? generateReferralCode();
-
-        const customer = { ...customerData, verified: true, referralCode };
-        localDb.customers[idx] = customer;
-        saveLocalDb(localDb);
-        res.json({ success: true, customer });
-        return;
-      }
-
-      const docRef = db!.collection('customers').doc(customerId);
+      const docRef = db.collection('customers').doc(customerId);
       const snap = await docRef.get();
       if (!snap.exists) {
         res.status(404).json({ success: false, message: 'Customer not found.' });
@@ -1538,7 +852,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const customerData = snap.data() as CustomerProfile;
 
-      const allCustomersSnap = await db!.collection('customers').where('verified', '==', true).get();
+      const allCustomersSnap = await db.collection('customers').where('verified', '==', true).get();
       const cleanPhone = (p: string) => p.replace(/\D/g, '');
       const targetPhone = cleanPhone(customerData.phone);
       const alreadyVerified = allCustomersSnap.docs.some((doc) => {

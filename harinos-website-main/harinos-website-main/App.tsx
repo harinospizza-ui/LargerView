@@ -428,27 +428,7 @@ const App: React.FC = () => {
     NotificationService.notifyOfferReleases(activeOfferCards);
   }, [activeOfferCards]);
 
-  useEffect(() => {
-    if (!configLoaded) return;
-    const retryPendingOrders = () => {
-      const pendingOrders = StorageService.getPendingOrderSyncQueue();
-      if (!pendingOrders.length) return;
 
-      pendingOrders.forEach((pendingOrder) => {
-        void saveFullOrderToServer(pendingOrder)
-          .then(() => StorageService.removePendingOrderSync(pendingOrder.id))
-          .catch(() => undefined);
-      });
-    };
-
-    retryPendingOrders();
-    const retryTimer = window.setInterval(retryPendingOrders, 15000);
-    window.addEventListener('online', retryPendingOrders);
-    return () => {
-      window.clearInterval(retryTimer);
-      window.removeEventListener('online', retryPendingOrders);
-    };
-  }, [configLoaded]);
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -1150,8 +1130,8 @@ const App: React.FC = () => {
       void notifyStaffNewOrder(newOrder, outlet.id);
     } catch (error) {
       console.error('Central Firestore order sync failed:', error);
-      StorageService.queuePendingOrderSync(newOrder);
-      showNotification('Order received. Syncing with outlet.');
+      alert('Service temporarily unavailable. Please try again later.');
+      return;
     }
 
     StorageService.saveOrder(newOrder);

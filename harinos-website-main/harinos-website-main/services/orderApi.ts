@@ -100,25 +100,22 @@ export const saveFullOrderToServer = async (order: Order): Promise<void> => {
   const localOrders = StorageService.getAdminOrders().filter((o) => o.id !== order.id);
   StorageService.saveAdminOrders([order, ...localOrders]);
 
+  const nextOrder: Order = {
+    ...order,
+    receivedAt: order.receivedAt ?? new Date().toISOString(),
+    status: order.status ?? 'new',
+  };
+
   if (isFirebaseClientConfigured()) {
-    const nextOrder: Order = {
-      ...order,
-      receivedAt: order.receivedAt ?? new Date().toISOString(),
-      status: order.status ?? 'new',
-    };
     try {
       await setDoc(doc(db(), FIRESTORE_ORDERS_COLLECTION, nextOrder.id), nextOrder, { merge: true });
       return;
     } catch (error) {
-      if (!getApiBase()) return;
+      throw new Error('Firebase client failed to save order.');
     }
   }
 
-  try {
-    await saveFullOrderViaApi(order);
-  } catch (error) {
-    console.warn('API save order failed:', error);
-  }
+  await saveFullOrderViaApi(nextOrder);
 };
 
 export const getServerOrders = async (): Promise<Order[]> => {

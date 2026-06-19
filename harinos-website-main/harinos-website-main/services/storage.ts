@@ -59,17 +59,6 @@ export const StorageService = {
     const updatedOrders = [order, ...orders].slice(0, 3);
     safeStorage.setItem(window.localStorage, KEYS.ORDERS, JSON.stringify(updatedOrders));
   },
-  queuePendingOrderSync: (order: Order): void => {
-    const pendingOrders = StorageService.getPendingOrderSyncQueue().filter((pendingOrder) => pendingOrder.id !== order.id);
-    writeJson(KEYS.PENDING_ORDERS, [order, ...pendingOrders].slice(0, 25));
-  },
-  getPendingOrderSyncQueue: (): Order[] => readJson<Order[]>(KEYS.PENDING_ORDERS, []),
-  removePendingOrderSync: (orderId: string): void => {
-    writeJson(
-      KEYS.PENDING_ORDERS,
-      StorageService.getPendingOrderSyncQueue().filter((order) => order.id !== orderId),
-    );
-  },
   saveAdminSession: (session: AdminSession): void => writeSessionJson(KEYS.ADMIN_SESSION, session),
   getAdminSession: (): AdminSession | null => readSessionJson<AdminSession | null>(KEYS.ADMIN_SESSION, null),
   clearAdminSession: (): void => {
