@@ -135,18 +135,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
 
   const previousOrderCount = useRef(0);
 
-  const refresh = useCallback(() => {
-    void getServerOrders().then((serverOrders) => setOrders(serverOrders)).catch(() => setOrders([]));
-    void getServerCustomers().then((remoteCustomers) => setCustomers(combineCustomers(remoteCustomers))).catch(() => setCustomers([]));
+  const refresh = useCallback((forceAll = false) => {
+    if (!session) return;
 
-    if (session) {
-      void getServerMenuItems().then((items) => setMenuItems(items)).catch(() => {});
-      void getServerOutlets().then((list) => setOutlets(list)).catch(() => {});
-      void getServerOffers().then((list) => setOffers(list)).catch(() => {});
-      void getServerWalletTransactions().then((txs) => setTransactions(txs)).catch(() => {});
-      void getServerSettings().then((settings) => setInstagramUrlInput(settings.instagramUrl || '')).catch(() => {});
+    if (forceAll || activeTab === 'orders' || activeTab === 'dashboard') {
+      void getServerOrders().then((serverOrders) => setOrders(serverOrders)).catch(() => setOrders([]));
     }
-  }, [session]);
+    if (forceAll || activeTab === 'wallets' || activeTab === 'dashboard') {
+      void getServerCustomers().then((remoteCustomers) => setCustomers(combineCustomers(remoteCustomers))).catch(() => setCustomers([]));
+    }
+
+    if (session.role !== 'staff') {
+      if (forceAll || activeTab === 'wallets') {
+        void getServerWalletTransactions().then((txs) => setTransactions(txs)).catch(() => {});
+      }
+      if (forceAll || activeTab === 'menu') {
+        void getServerMenuItems().then((items) => setMenuItems(items)).catch(() => {});
+      }
+      if (forceAll || activeTab === 'outlets') {
+        void getServerOutlets().then((list) => setOutlets(list)).catch(() => {});
+      }
+      if (forceAll || activeTab === 'offers') {
+        void getServerOffers().then((list) => setOffers(list)).catch(() => {});
+      }
+      if (forceAll || activeTab === 'settings') {
+        void getServerSettings().then((settings) => setInstagramUrlInput(settings.instagramUrl || '')).catch(() => {});
+      }
+    }
+  }, [session, activeTab]);
 
   useEffect(() => {
     if (!session) return;

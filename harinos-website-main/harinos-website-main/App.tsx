@@ -18,7 +18,7 @@ import { MENU_ITEMS, OFFER_CARDS, OUTLET_LOCATIONS } from './constants';
 import { StorageService } from './services/storage';
 import { setDynamicFirebaseConfig } from './services/firebaseClient';
 import { NotificationService } from './services/notification';
-import { getServerOrders, saveCustomerToServer, saveFullOrderToServer, subscribeServerOrder, getServerMenuItems, seedMenuItemsToServer, subscribeServerMenuItems, getServerOutlets, seedOutletsToServer, subscribeServerOutlets, getServerOffers, seedOffersToServer, subscribeServerOffers, saveWalletTransactionToServer, getServerCustomers, verifyServerCustomer, getServerSettings } from './services/orderApi';
+import { getServerOrders, saveCustomerToServer, saveFullOrderToServer, subscribeServerOrder, getServerMenuItems, seedMenuItemsToServer, subscribeServerMenuItems, getServerOutlets, seedOutletsToServer, subscribeServerOutlets, getServerOffers, seedOffersToServer, subscribeServerOffers, saveWalletTransactionToServer, getServerCustomers, verifyServerCustomer, getServerSettings, getServerCustomerById } from './services/orderApi';
 import { copyTextToClipboard, getNotificationPermission } from './services/browserSupport';
 import { notifyStaffNewOrder, requestNotificationPermission } from './services/notificationService';
 import {
@@ -530,8 +530,7 @@ const App: React.FC = () => {
 
     const pollProfile = async () => {
       try {
-        const customers = await getServerCustomers();
-        const fresh = customers.find((c) => c.id === customerProfile.id);
+        const fresh = await getServerCustomerById(customerProfile.id);
         if (fresh && isMounted) {
           if (fresh.status === 'blocked' || fresh.status === 'removed') {
             alert('Your account has been deactivated or blocked by an administrator. You will be logged out.');
@@ -556,7 +555,7 @@ const App: React.FC = () => {
     };
 
     pollProfile();
-    const interval = setInterval(pollProfile, 4000);
+    const interval = setInterval(pollProfile, 8000);
 
     return () => {
       isMounted = false;

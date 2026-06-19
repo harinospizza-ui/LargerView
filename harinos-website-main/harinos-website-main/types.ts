@@ -161,6 +161,7 @@ export interface CustomerProfile {
   referralAttempts?: number;
   referralApplied?: boolean;
   otp?: string;
+  otpExpiry?: number;
   createdAt: string;
   walletBalance?: number;
   rewardPoints?: number;

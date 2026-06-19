@@ -144,6 +144,7 @@ export const jsonStore: OrderStore = {
   saveOrder: saveStoredOrder,
   updateOrderStatus: updateStoredOrderStatus,
   getCustomers: getStoredCustomers,
+  getCustomer: async (customerId) => (await getStoredCustomers()).find((c) => c.id === customerId) || null,
   saveCustomer: saveStoredCustomer,
   verifyCustomer: verifyStoredCustomer,
   getMenuItems: getStoredMenuItems,

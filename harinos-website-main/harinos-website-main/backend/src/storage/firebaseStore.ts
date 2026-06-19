@@ -84,6 +84,13 @@ export const firebaseStore: OrderStore = {
     });
   },
 
+  async getCustomer(customerId) {
+    const docRef = getFirestore().collection('customers').doc(customerId);
+    const snap = await withTimeout(docRef.get(), 'Fetching single customer from Firebase');
+    if (!snap.exists) return null;
+    return snap.data() as CustomerProfile;
+  },
+
   async saveCustomer(profile) {
     await withTimeout(
       getFirestore().collection('customers').doc(profile.id).set(profile, { merge: true }),

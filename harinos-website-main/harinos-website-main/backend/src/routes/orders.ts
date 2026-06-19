@@ -451,9 +451,37 @@ router.delete('/orders/:orderId', async (req, res, next) => {
   }
 });
 
-router.get('/customers', async (_req, res, next) => {
+router.get('/customers', async (req, res, next) => {
   try {
-    res.json({ success: true, customers: await getOrderStore().getCustomers() });
+    const { customerId, phone } = req.query as { customerId?: string; phone?: string };
+    const store = getOrderStore();
+    
+    if (customerId) {
+      const customer = await store.getCustomer(decodeURIComponent(customerId));
+      if (!customer) {
+        res.status(404).json({ success: false, message: 'Customer not found.' });
+        return;
+      }
+      res.json({ success: true, customer });
+      return;
+    }
+
+    if (phone) {
+      const rawPhone = decodeURIComponent(phone);
+      const cleanPhone = (p: string) => p.replace(/\D/g, '');
+      const targetPhoneDigits = cleanPhone(rawPhone);
+      
+      const allCustomers = await store.getCustomers();
+      const match = allCustomers.find((c) => {
+        if (!c.phone) return false;
+        return c.phone === rawPhone || cleanPhone(c.phone) === targetPhoneDigits;
+      });
+      
+      res.json({ success: true, customer: match || null });
+      return;
+    }
+
+    res.json({ success: true, customers: await store.getCustomers() });
   } catch (error) {
     next(error);
   }
@@ -461,13 +489,127 @@ router.get('/customers', async (_req, res, next) => {
 
 router.post('/customers', async (req, res, next) => {
   try {
+    const { action } = req.query as { action?: string };
+    const store = getOrderStore();
+
+    if (action === 'login-init') {
+      const { phone, name, isRegistering } = req.body as { phone: string; name?: string; isRegistering?: boolean };
+      if (!phone) {
+        res.status(400).json({ success: false, message: 'Phone number is required.' });
+        return;
+      }
+
+      const cleanPhone = (p: string) => p.replace(/\D/g, '');
+      const targetPhone = cleanPhone(phone);
+
+      const allCustomers = await store.getCustomers();
+      const existingCustomer = allCustomers.find(c => c.phone && cleanPhone(c.phone) === targetPhone);
+
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpExpiry = Date.now() + 10 * 60 * 1000;
+
+      if (existingCustomer) {
+        const updated = {
+          ...existingCustomer,
+          otp,
+          otpExpiry
+        };
+        await store.saveCustomer(updated);
+        res.json({
+          success: true,
+          exists: true,
+          customerId: existingCustomer.id,
+          otp,
+          message: 'OTP generated successfully.'
+        });
+        return;
+      } else {
+        if (!isRegistering) {
+          res.json({
+            success: false,
+            exists: false,
+            message: 'Account does not exist. Please create an account.'
+          });
+          return;
+        }
+
+        const newCustomerId = `cust_${Date.now()}`;
+        const newCustomer: CustomerProfile = {
+          id: newCustomerId,
+          name: name?.trim() || 'New Customer',
+          phone: phone,
+          email: '',
+          loginMethod: 'phone',
+          verified: false,
+          createdAt: new Date().toISOString(),
+          walletBalance: 0,
+          rewardPoints: 0,
+          status: 'active',
+          referralAttemptsRemaining: 3,
+          referralCodeUsed: false,
+          referralLocked: false,
+          otp,
+          otpExpiry
+        };
+
+        await store.saveCustomer(newCustomer);
+        res.status(201).json({
+          success: true,
+          exists: false,
+          customerId: newCustomerId,
+          otp,
+          message: 'OTP generated for registration.'
+        });
+        return;
+      }
+    }
+
+    if (action === 'login-verify') {
+      const { customerId, otp } = req.body as { customerId: string; otp: string };
+      if (!customerId || !otp) {
+        res.status(400).json({ success: false, message: 'Customer ID and OTP are required.' });
+        return;
+      }
+
+      const customer = await store.getCustomer(customerId);
+      if (!customer) {
+        res.status(404).json({ success: false, message: 'Customer not found.' });
+        return;
+      }
+
+      if (customer.otp === otp) {
+        const generateReferralCode = () => {
+          return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+        };
+        const referralCode = customer.referralCode ?? generateReferralCode();
+        
+        const updatedCustomer: CustomerProfile = {
+          ...customer,
+          verified: true,
+          referralCode,
+        };
+        delete updatedCustomer.otp;
+        delete updatedCustomer.otpExpiry;
+
+        await store.saveCustomer(updatedCustomer);
+        res.json({
+          success: true,
+          customer: updatedCustomer
+        });
+        return;
+      } else {
+        res.status(400).json({ success: false, message: 'Incorrect OTP. Please try again.' });
+        return;
+      }
+    }
+
     const profile = req.body as Partial<CustomerProfile>;
     if (!profile.id || !profile.name || !profile.phone) {
       res.status(400).json({ success: false, message: 'Invalid customer profile.' });
       return;
     }
 
-    await getOrderStore().saveCustomer(profile as CustomerProfile);
+    await store.saveCustomer(profile as CustomerProfile);
     res.status(201).json({ success: true, customer: profile });
   } catch (error) {
     next(error);

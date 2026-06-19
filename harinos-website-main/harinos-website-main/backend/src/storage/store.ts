@@ -6,6 +6,7 @@ export interface OrderStore {
   saveOrder(order: FullOrderPayload): Promise<void>;
   updateOrderStatus(orderId: string, status: OrderStatus): Promise<void>;
   getCustomers(): Promise<CustomerProfile[]>;
+  getCustomer(customerId: string): Promise<CustomerProfile | null>;
   saveCustomer(profile: CustomerProfile): Promise<void>;
   verifyCustomer(customerId: string): Promise<CustomerProfile | null>;
   getMenuItems(): Promise<MenuItem[]>;

@@ -175,6 +175,13 @@ export const mysqlStore: OrderStore = {
     return rows.map((row) => parseJsonColumn<CustomerProfile>(row.payload));
   },
 
+  async getCustomer(customerId) {
+    await ensureSchema();
+    const [rows] = await getPool().execute<mysql.RowDataPacket[]>('SELECT payload FROM customers WHERE id = ?', [customerId]);
+    if (!rows.length) return null;
+    return parseJsonColumn<CustomerProfile>(rows[0].payload);
+  },
+
   async saveCustomer(profile) {
     await ensureSchema();
     await getPool().execute(

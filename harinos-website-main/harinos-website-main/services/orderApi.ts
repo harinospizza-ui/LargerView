@@ -267,6 +267,60 @@ export const getServerCustomers = async (): Promise<CustomerProfile[]> => {
   }
 };
 
+export const getServerCustomerById = async (customerId: string): Promise<CustomerProfile | null> => {
+  try {
+    const apiBase = getApiBase();
+    if (!apiBase) return StorageService.getAdminCustomers().find(c => c.id === customerId) || null;
+    const response = await fetch(`${apiBase}/customers?customerId=${encodeURIComponent(customerId)}`, { cache: 'no-store' });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { customer?: CustomerProfile };
+    return data.customer ?? null;
+  } catch (error) {
+    console.warn('API get customer by id failed:', error);
+    return StorageService.getAdminCustomers().find(c => c.id === customerId) || null;
+  }
+};
+
+export const initCustomerLogin = async (
+  phone: string,
+  name?: string,
+  isRegistering?: boolean
+): Promise<{ success: boolean; exists: boolean; customerId?: string; otp?: string; message?: string }> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
+  
+  const response = await fetch(`${apiBase}/customers?action=login-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, name, isRegistering }),
+  });
+  
+  const data = await response.json();
+  return data;
+};
+
+export const verifyCustomerLogin = async (
+  customerId: string,
+  otp: string
+): Promise<{ success: boolean; customer?: CustomerProfile; message?: string }> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
+  
+  const response = await fetch(`${apiBase}/customers?action=login-verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerId, otp }),
+  });
+  
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.message || 'OTP verification failed.');
+  }
+  
+  const data = await response.json();
+  return data;
+};
+
 export const verifyServerCustomer = async (customerId: string): Promise<CustomerProfile | null> => {
   const localCusts = StorageService.getAdminCustomers();
   const targetIdx = localCusts.findIndex((c) => c.id === customerId);
