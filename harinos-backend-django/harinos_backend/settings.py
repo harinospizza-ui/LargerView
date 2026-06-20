@@ -152,3 +152,8 @@ JWT_SECRET = os.getenv('JWT_SECRET', 'dev-harinos-pizza-secret-key-32-chars-mini
 
 # AES Encryption Key for PII and backups
 ENCRYPTION_KEY = config_data.get('ENCRYPTION_KEY', os.getenv('ENCRYPTION_KEY', ''))
+
+# WhatsApp Gateway Configurations
+WHATSAPP_API_URL = config_data.get('WHATSAPP_API_URL', os.getenv('WHATSAPP_API_URL', ''))
+WHATSAPP_API_TOKEN = config_data.get('WHATSAPP_API_TOKEN', os.getenv('WHATSAPP_API_TOKEN', ''))
+

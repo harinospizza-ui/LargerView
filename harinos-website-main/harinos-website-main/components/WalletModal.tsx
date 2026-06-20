@@ -169,51 +169,28 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                   }
 
                   try {
-                    const remoteCustomers = await getServerCustomers();
-                    const freshProfile = remoteCustomers.find((c) => c.id === customerProfile.id);
+                    const result = await verifyServerCustomer(customerProfile.id, otpVal);
+                    if (result) {
+                      StorageService.markCustomerVerified(customerProfile.id);
+                      const updated = {
+                        ...customerProfile,
+                        verified: true,
+                        referralCode: result.referralCode,
+                        otp: undefined
+                      };
+                      StorageService.saveCustomerProfile(updated);
+                      onProfileChange(updated);
 
-                    if (!freshProfile) {
                       showNotification({
-                        title: 'Error',
-                        message: 'Could not retrieve your profile from the server.',
-                        type: 'error'
+                        title: 'Account Verified!',
+                        message: `Your profile is verified. Code: ${result.referralCode ?? ''}`,
+                        type: 'success'
                       });
-                      return;
-                    }
-
-                    if (!freshProfile.otp) {
-                      showNotification({
-                        title: 'Verification Pending',
-                        message: 'No OTP has been generated for your account yet.',
-                        type: 'warning'
-                      });
-                      return;
-                    }
-
-                    if (freshProfile.otp === otpVal) {
-                      const result = await verifyServerCustomer(customerProfile.id);
-                      if (result) {
-                        StorageService.markCustomerVerified(customerProfile.id);
-                        const updated = {
-                          ...customerProfile,
-                          verified: true,
-                          referralCode: result.referralCode,
-                          otp: undefined
-                        };
-                        StorageService.saveCustomerProfile(updated);
-                        onProfileChange(updated);
-
-                        showNotification({
-                          title: 'Account Verified!',
-                          message: `Your profile is verified. Code: ${result.referralCode ?? ''}`,
-                          type: 'success'
-                        });
-                        setInputOtp('');
-                      }
+                      setInputOtp('');
                     } else {
                       showNotification({
                         title: 'Verification Failed',
-                        message: 'Incorrect OTP. Please try again.',
+                        message: 'Could not verify customer profile.',
                         type: 'error'
                       });
                     }

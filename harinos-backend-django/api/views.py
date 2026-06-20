@@ -157,11 +157,52 @@ def send_fcm_notification(event_type, order_id, role, outlet_id=None, customer_t
 
 # --- AUTH ENDPOINTS ---
 
-DEFAULT_STAFF = [
-    { 'role': 'admin', 'username': 'Admin_Harinos', 'password': 'Harinos_Admin', 'outletId': None },
-    { 'role': 'manager', 'username': 'Manager_Harinos', 'password': 'Harinos_Manager', 'outletId': None },
-    { 'role': 'staff', 'username': 'Staff_Harinos', 'password': 'Harinos_Staff', 'outletId': None },
-]
+def send_whatsapp_message(phone, text):
+    """
+    Sends WhatsApp message via the configured URL and Token.
+    Returns (success: bool, status_message: str)
+    """
+    import requests
+    api_url = getattr(settings, 'WHATSAPP_API_URL', '')
+    api_token = getattr(settings, 'WHATSAPP_API_TOKEN', '')
+    
+    if not api_url or not api_token:
+        return False, "WhatsApp Gateway credentials not configured."
+        
+    clean_phone = ''.join(c for c in str(phone) if c.isdigit())
+    if len(clean_phone) == 10:
+        clean_phone = '91' + clean_phone
+        
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {api_token}'
+    }
+    payload = {
+        'to': clean_phone,
+        'body': text
+    }
+    
+    try:
+        if 'ultramsg' in api_url.lower():
+            url = api_url
+            if not url.endswith('/messages/chat'):
+                url = url.rstrip('/') + '/messages/chat'
+            data = {
+                'token': api_token,
+                'to': clean_phone,
+                'body': text
+            }
+            res = requests.post(url, data=data, timeout=10)
+        else:
+            res = requests.post(api_url, json=payload, headers=headers, timeout=10)
+            
+        if res.ok:
+            return True, "Sent successfully."
+        else:
+            return False, f"Gateway error {res.status_code}: {res.text[:100]}"
+    except Exception as e:
+        return False, f"Connection error: {str(e)}"
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -170,21 +211,6 @@ def auth_login(request):
     password = request.data.get('password')
     if not username or not password:
         return Response({'success': False, 'message': 'Missing username or password.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Seed staff if database is empty
-    if not StaffUser.objects.exists():
-        for user in DEFAULT_STAFF:
-            hashed_pw = hash_password(user['password'])
-            StaffUser.objects.create(
-                username=user['username'],
-                role=user['role'],
-                payload={
-                    'username': user['username'],
-                    'role': user['role'],
-                    'password': hashed_pw,
-                    'outletId': user['outletId']
-                }
-            )
 
     try:
         user = StaffUser.objects.get(username=username)
@@ -472,17 +498,36 @@ def wallet_transactions(request):
         return Response({'success': True, 'transactions': serializer.data})
 
     # POST
-    # Authenticate and validate roles
-    auth = JWTAuthentication()
-    auth_res = auth.authenticate(request)
-    if not auth_res:
-        return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
-    user_obj, _ = auth_res
-    if user_obj.role not in ['admin', 'manager']:
-        log_security_event(request, f"Unauthorized wallet write attempt by user '{user_obj.username}' (role: {user_obj.role}) denied")
-        return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
-
     tx = request.data
+    tx_status = tx.get('status')
+    tx_type = tx.get('type')
+    cust_id = tx.get('customerId')
+
+    # Enforce blocked checks
+    if cust_id:
+        try:
+            cust = Customer.objects.get(id=cust_id)
+            if cust.payload.get('status') == 'blocked':
+                return Response({'success': False, 'message': 'This account is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+            clean_phone = ''.join(c for c in cust.phone if c.isdigit())
+            if BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).exists():
+                return Response({'success': False, 'message': 'This mobile number is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+        except Customer.DoesNotExist:
+            pass
+
+    # Authenticate and validate roles for non-pending or non-topup transactions
+    is_pending_topup = (tx_status == 'pending' and tx_type == 'topup')
+    user_obj = None
+    if not is_pending_topup:
+        auth = JWTAuthentication()
+        auth_res = auth.authenticate(request)
+        if not auth_res:
+            return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user_obj, _ = auth_res
+        if user_obj.role not in ['admin', 'manager']:
+            log_security_event(request, f"Unauthorized wallet write attempt by user '{user_obj.username}' (role: {user_obj.role}) denied")
+            return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
     tx_id = tx.get('id') or f"tx_{int(time.time()*1000)}"
     tx['id'] = tx_id
     created_str = tx.get('createdAt') or datetime.utcnow().isoformat() + 'Z'
@@ -499,22 +544,23 @@ def wallet_transactions(request):
             }
         )
 
-        # Update customer balance
-        cust_id = tx.get('customerId')
-        amount = float(tx.get('amount', 0))
-        if cust_id:
-            try:
-                cust = Customer.objects.get(id=cust_id)
-                payload = cust.payload
-                current_bal = float(payload.get('walletBalance', 0))
-                new_bal = current_bal + amount
-                payload['walletBalance'] = new_bal
-                cust.payload = payload
-                cust.save()
-                log_security_event(request, f"Wallet adjustment of {amount} for customer {cust_id} (New balance: {new_bal}) authorized by '{user_obj.username}'")
-            except Customer.DoesNotExist:
-                log_security_event(request, f"Wallet transaction tried to update non-existent customer {cust_id}")
-                pass
+        # Update customer balance ONLY after approval (status == 'completed')
+        if tx_status == 'completed':
+            amount = float(tx.get('amount', 0))
+            if cust_id:
+                try:
+                    cust = Customer.objects.get(id=cust_id)
+                    payload = cust.payload
+                    current_bal = float(payload.get('walletBalance', 0))
+                    new_bal = current_bal + amount
+                    payload['walletBalance'] = new_bal
+                    cust.payload = payload
+                    cust.save()
+                    operator = user_obj.username if user_obj else 'system'
+                    log_security_event(request, f"Wallet top-up of {amount} for customer {cust_id} approved by '{operator}'. New balance: {new_bal}")
+                except Customer.DoesNotExist:
+                    log_security_event(request, f"Wallet transaction tried to update non-existent customer {cust_id}")
+                    pass
 
     complete_transaction(tx_id)
 
@@ -529,24 +575,24 @@ def customers_endpoint(request):
 
     # GET Customers
     if request.method == 'GET':
-        # check usage (Mock analytics log)
         if action == 'usage':
-            # return some mock usage stats to UI
-            mock_usage = [
+            # Count real database rows to represent database size and usage
+            from .models import MenuItem, Outlet
+            log_data = [
                 {
-                    'id': datetime.now().strftime('%Y-%m-%d'),
-                    'timestamp': datetime.now().isoformat(),
-                    'reads': 450,
-                    'writes': 85,
-                    'deletes': 2,
-                    'ordersReads': 210,
-                    'customersReads': 120,
-                    'walletReads': 45,
-                    'menuReads': 60,
-                    'otherReads': 15
+                    'id': timezone.now().strftime('%Y-%m-%d'),
+                    'timestamp': timezone.now().isoformat(),
+                    'reads': Customer.objects.count() + Order.objects.count() + WalletTransaction.objects.count(),
+                    'writes': Customer.objects.count() + Order.objects.count(),
+                    'deletes': BlockedCustomer.objects.count(),
+                    'ordersReads': Order.objects.count(),
+                    'customersReads': Customer.objects.count(),
+                    'walletReads': WalletTransaction.objects.count(),
+                    'menuReads': MenuItem.objects.count(),
+                    'otherReads': Outlet.objects.count()
                 }
             ]
-            return Response({'success': True, 'logs': mock_usage})
+            return Response({'success': True, 'logs': log_data})
 
         cust_id = request.query_params.get('customerId')
         if cust_id:
@@ -563,14 +609,233 @@ def customers_endpoint(request):
 
     # DELETE Customer
     if request.method == 'DELETE':
+        # Enforce authentication for delete requests (only admins/managers)
+        auth = JWTAuthentication()
+        auth_res = auth.authenticate(request)
+        if not auth_res:
+            return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user_obj, _ = auth_res
+        if user_obj.role not in ['admin', 'manager']:
+            return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
         cust_id = request.query_params.get('customerId')
         if not cust_id:
             return Response({'success': False, 'message': 'customerId required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            Customer.objects.filter(id=cust_id).delete()
+            cust = Customer.objects.get(id=cust_id)
+            phone = cust.phone
+            cust.delete()
+            log_security_event(request, f"Removed customer {cust_id} ({phone})")
             return Response({'success': True})
+        except Customer.DoesNotExist:
+            return Response({'success': False, 'message': 'Customer not found.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # POST Action: send-otp (Admin action)
+    if action == 'send-otp':
+        auth = JWTAuthentication()
+        auth_res = auth.authenticate(request)
+        if not auth_res:
+            return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user_obj, _ = auth_res
+        if user_obj.role not in ['admin', 'manager']:
+            return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        customer_id = request.data.get('customerId')
+        if not customer_id:
+            return Response({'success': False, 'message': 'customerId required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            cust = Customer.objects.get(id=customer_id)
+            p = cust.payload
+
+            # Check if blocked
+            clean_phone = ''.join(c for c in cust.phone if c.isdigit())
+            if BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).exists() or p.get('status') == 'blocked':
+                return Response({'success': False, 'message': 'This account is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+
+            # Generate secure random 6-digit OTP
+            import secrets
+            otp_val = str(secrets.randbelow(900000) + 100000)
+            otp_expiry = int((time.time() + 10 * 60) * 1000)
+
+            p['otp'] = otp_val
+            p['otpExpiry'] = otp_expiry
+            cust.payload = p
+            cust.save()
+
+            # Send OTP
+            success, status_msg = send_whatsapp_message(
+                cust.phone,
+                f"[Harino's Pizza] Your verification OTP is: {otp_val}"
+            )
+
+            log_security_event(request, f"Admin '{user_obj.username}' sent OTP to customer {customer_id} ({cust.phone}). Result: {status_msg}")
+
+            if success:
+                return Response({
+                    'success': True,
+                    'message': 'OTP sent successfully via WhatsApp.',
+                    'timestamp': timezone.now().isoformat() + 'Z'
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': f'Failed to send OTP via WhatsApp: {status_msg}',
+                    'timestamp': timezone.now().isoformat() + 'Z'
+                }, status=status.HTTP_502_BAD_GATEWAY)
+        except Customer.DoesNotExist:
+            return Response({'success': False, 'message': 'Customer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # POST Action: block (Admin action)
+    if action == 'block':
+        auth = JWTAuthentication()
+        auth_res = auth.authenticate(request)
+        if not auth_res:
+            return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user_obj, _ = auth_res
+        if user_obj.role not in ['admin', 'manager']:
+            return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        customer_id = request.data.get('customerId')
+        is_blocked = request.data.get('blocked', True)
+        try:
+            cust = Customer.objects.get(id=customer_id)
+            p = cust.payload
+            
+            clean_phone = ''.join(c for c in cust.phone if c.isdigit())
+            if is_blocked:
+                p['status'] = 'blocked'
+                cust.payload = p
+                cust.save()
+
+                BlockedCustomer.objects.update_or_create(
+                    phone=clean_phone,
+                    defaults={
+                        'phone_hash': hash_phone(clean_phone),
+                        'blocked_at': timezone.now(),
+                        'customer_id': cust.id,
+                        'name': p.get('name', 'Blocked Customer')
+                    }
+                )
+                log_security_event(request, f"Admin '{user_obj.username}' blocked customer {customer_id} ({cust.phone})")
+                return Response({'success': True, 'message': 'Customer blocked successfully.'})
+            else:
+                p['status'] = 'active'
+                cust.payload = p
+                cust.save()
+
+                BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).delete()
+                log_security_event(request, f"Admin '{user_obj.username}' unblocked customer {customer_id} ({cust.phone})")
+                return Response({'success': True, 'message': 'Customer unblocked successfully.'})
+        except Customer.DoesNotExist:
+            return Response({'success': False, 'message': 'Customer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # POST Action: remove (Admin action)
+    if action == 'remove':
+        auth = JWTAuthentication()
+        auth_res = auth.authenticate(request)
+        if not auth_res:
+            return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user_obj, _ = auth_res
+        if user_obj.role not in ['admin', 'manager']:
+            return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        customer_id = request.data.get('customerId')
+        try:
+            cust = Customer.objects.get(id=customer_id)
+            phone = cust.phone
+            cust.delete()
+            log_security_event(request, f"Admin '{user_obj.username}' removed customer {customer_id} ({phone})")
+            return Response({'success': True, 'message': 'Customer profile deleted successfully.'})
+        except Customer.DoesNotExist:
+            return Response({'success': False, 'message': 'Customer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # POST Action: bulk-remove (Admin action)
+    if action == 'bulk-remove':
+        auth = JWTAuthentication()
+        auth_res = auth.authenticate(request)
+        if not auth_res:
+            return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user_obj, _ = auth_res
+        if user_obj.role not in ['admin', 'manager']:
+            return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        customer_ids = request.data.get('customerIds', [])
+        if not isinstance(customer_ids, list):
+            return Response({'success': False, 'message': 'customerIds must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        removed_count = 0
+        for cid in customer_ids:
+            try:
+                cust = Customer.objects.get(id=cid)
+                phone = cust.phone
+                cust.delete()
+                log_security_event(request, f"Admin '{user_obj.username}' removed customer {cid} ({phone}) via bulk operation")
+                removed_count += 1
+            except Customer.DoesNotExist:
+                pass
+        return Response({'success': True, 'message': f'Successfully removed {removed_count} customers.'})
+
+    # POST Action: merge (Admin action)
+    if action == 'merge':
+        auth = JWTAuthentication()
+        auth_res = auth.authenticate(request)
+        if not auth_res:
+            return Response({'success': False, 'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user_obj, _ = auth_res
+        if user_obj.role not in ['admin', 'manager']:
+            return Response({'success': False, 'message': 'Admin or manager privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        primary_id = request.data.get('primaryId')
+        secondary_id = request.data.get('secondaryId')
+
+        if not primary_id or not secondary_id:
+            return Response({'success': False, 'message': 'primaryId and secondaryId are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            primary_cust = Customer.objects.get(id=primary_id)
+            secondary_cust = Customer.objects.get(id=secondary_id)
+
+            p_payload = primary_cust.payload
+            s_payload = secondary_cust.payload
+
+            p_bal = float(p_payload.get('walletBalance', 0))
+            s_bal = float(s_payload.get('walletBalance', 0))
+            p_points = int(p_payload.get('rewardPoints', 0))
+            s_points = int(s_payload.get('rewardPoints', 0))
+
+            p_payload['walletBalance'] = p_bal + s_bal
+            p_payload['rewardPoints'] = p_points + s_points
+
+            with transaction.atomic():
+                primary_cust.payload = p_payload
+                primary_cust.save()
+                secondary_cust.delete()
+
+                # Log transfer transaction
+                merge_tx_id = f"tx_merge_{primary_id}_{secondary_id}_{int(time.time())}"
+                WalletTransaction.objects.create(
+                    id=merge_tx_id,
+                    created_at=timezone.now(),
+                    payload={
+                        'id': merge_tx_id,
+                        'customerId': primary_id,
+                        'customerName': p_payload.get('name'),
+                        'customerPhone': primary_cust.phone,
+                        'amount': s_bal,
+                        'type': 'admin_adjustment',
+                        'status': 'completed',
+                        'createdAt': timezone.now().isoformat() + 'Z',
+                        'description': f"Merged balance of Rs {s_bal} from duplicate account {secondary_id}"
+                    }
+                )
+
+            log_security_event(request, f"Admin '{user_obj.username}' merged duplicate account {secondary_id} into primary {primary_id}. Transfer amount: Rs {s_bal}")
+            return Response({'success': True, 'message': 'Customers merged successfully.', 'customer': p_payload})
+        except Customer.DoesNotExist:
+            return Response({'success': False, 'message': 'One or both customer profiles not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     # POST Action: login-init
     if action == 'login-init':
@@ -587,14 +852,9 @@ def customers_endpoint(request):
         if BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).exists():
             return Response({'success': False, 'message': 'This mobile number is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
 
-        otp = str(timezone.random_otp() if hasattr(timezone, 'random_otp') else int(100000 + (time.time() % 1) * 900000))
-        # Hardcode a secure but easily verifiable testing OTP fallback just in case:
-        otp = str(os.urandom(3).hex())[:6]
-        # Ensure it is a 6-digit numeric string
-        otp = ''.join(c for c in otp if c.isdigit())
-        if len(otp) < 6:
-            otp = otp.zfill(6)
-            
+        # Generate secure random 6-digit OTP
+        import secrets
+        otp = str(secrets.randbelow(900000) + 100000)
         otp_expiry = int((time.time() + 10 * 60) * 1000)
 
         # Find existing customer
@@ -602,17 +862,34 @@ def customers_endpoint(request):
         
         if cust:
             p = cust.payload
+            
+            # Additional block check inside payload
+            if p.get('status') == 'blocked':
+                return Response({'success': False, 'message': 'This mobile number is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+
             p['otp'] = otp
             p['otpExpiry'] = otp_expiry
             cust.payload = p
             cust.save()
-            return Response({
-                'success': True,
-                'exists': True,
-                'customerId': cust.id,
-                'otp': otp,
-                'message': 'OTP generated successfully.'
-            })
+
+            # Dispatch OTP via WhatsApp
+            success, status_msg = send_whatsapp_message(
+                phone,
+                f"[Harino's Pizza] Your verification OTP is: {otp}"
+            )
+            
+            if success:
+                return Response({
+                    'success': True,
+                    'exists': True,
+                    'customerId': cust.id,
+                    'message': 'OTP sent successfully via WhatsApp.'
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': f'OTP service temporarily unavailable. {status_msg}'
+                }, status=status.HTTP_502_BAD_GATEWAY)
         else:
             if not is_registering:
                 return Response({'success': False, 'exists': False, 'message': 'Account does not exist. Please create an account.'})
@@ -636,21 +913,31 @@ def customers_endpoint(request):
                 'otpExpiry': otp_expiry
             }
 
-            Customer.objects.create(
-                id=new_id,
-                payload=new_cust_payload,
-                phone=phone,
-                verified=False,
-                created_at=timezone.now()
+            # Dispatch OTP via WhatsApp
+            success, status_msg = send_whatsapp_message(
+                phone,
+                f"[Harino's Pizza] Your verification OTP is: {otp}"
             )
 
-            return Response({
-                'success': True,
-                'exists': False,
-                'customerId': new_id,
-                'otp': otp,
-                'message': 'OTP generated for registration.'
-            })
+            if success:
+                Customer.objects.create(
+                    id=new_id,
+                    payload=new_cust_payload,
+                    phone=phone,
+                    verified=False,
+                    created_at=timezone.now()
+                )
+                return Response({
+                    'success': True,
+                    'exists': False,
+                    'customerId': new_id,
+                    'message': 'OTP sent successfully via WhatsApp.'
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': f'OTP service temporarily unavailable. {status_msg}'
+                }, status=status.HTTP_502_BAD_GATEWAY)
 
     # POST Action: login-verify
     if action == 'login-verify':
@@ -663,8 +950,20 @@ def customers_endpoint(request):
             cust = Customer.objects.get(id=customer_id)
             p = cust.payload
             
+            # Check blocked
+            if p.get('status') == 'blocked':
+                return Response({'success': False, 'message': 'This account is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+            clean_phone = ''.join(c for c in cust.phone if c.isdigit())
+            if BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).exists():
+                return Response({'success': False, 'message': 'This mobile number is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+
             # Verify OTP
             if str(p.get('otp')) == str(otp):
+                # Check OTP expiry
+                expiry = p.get('otpExpiry', 0)
+                if int(time.time() * 1000) > expiry:
+                    return Response({'success': False, 'message': 'OTP has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
                 # Success
                 import random
                 referral_code = p.get('referralCode') or f"REF{random.randint(100000, 999999)}"
@@ -693,6 +992,13 @@ def customers_endpoint(request):
             cust = Customer.objects.get(id=customer_id)
             p = cust.payload
 
+            # Check blocked
+            if p.get('status') == 'blocked':
+                return Response({'success': False, 'message': 'This account is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+            clean_phone = ''.join(c for c in cust.phone if c.isdigit())
+            if BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).exists():
+                return Response({'success': False, 'message': 'This mobile number is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+
             # Lifetime rule: can only enter referral code once
             if p.get('referralCodeUsed') or p.get('referralApplied'):
                 return Response({'success': False, 'message': 'Referral code has already been applied.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -702,7 +1008,6 @@ def customers_endpoint(request):
                 return Response({'success': False, 'message': 'Referral attempts exhausted.'}, status=status.HTTP_400_BAD_REQUEST)
 
             # Find matching referrer customer
-            # (Look through JSON payloads or scan DB)
             referrer = None
             for c in Customer.objects.exclude(id=customer_id):
                 if c.payload.get('referralCode', '').upper() == referral_code:
@@ -710,6 +1015,10 @@ def customers_endpoint(request):
                     break
 
             if referrer:
+                # Check if referrer is blocked
+                if referrer.payload.get('status') == 'blocked':
+                    return Response({'success': False, 'message': 'Referrer account is blocked.'}, status=status.HTTP_400_BAD_REQUEST)
+
                 ref_tx_id = f"tx_ref_apply_{customer_id}"
                 log_transaction(ref_tx_id, 'apply_referral', {
                     'customerId': customer_id,
@@ -718,23 +1027,20 @@ def customers_endpoint(request):
 
                 with transaction.atomic():
                     # Apply Referral rewards!
-                    # 1. Update target customer
                     p['referralCodeUsed'] = True
                     p['referralApplied'] = True
                     p['referralAppliedAt'] = datetime.utcnow().isoformat() + 'Z'
                     
-                    # Reward: add Rs 50
                     p['walletBalance'] = float(p.get('walletBalance', 0)) + 50.0
                     cust.payload = p
                     cust.save()
 
-                    # 2. Update referrer customer
                     ref_payload = referrer.payload
                     ref_payload['walletBalance'] = float(ref_payload.get('walletBalance', 0)) + 50.0
                     referrer.payload = ref_payload
                     referrer.save()
 
-                    # 3. Create wallet transaction logs
+                    # Create wallet logs
                     now_str = datetime.utcnow().isoformat() + 'Z'
                     tx1_id = f"tx_ref1_{int(time.time()*1000)}"
                     WalletTransaction.objects.create(
@@ -744,7 +1050,7 @@ def customers_endpoint(request):
                             'id': tx1_id,
                             'customerId': cust.id,
                             'customerName': p.get('name'),
-                            'customerPhone': p.get('phone'),
+                            'customerPhone': cust.phone,
                             'amount': 50.0,
                             'type': 'reward',
                             'status': 'completed',
@@ -760,7 +1066,7 @@ def customers_endpoint(request):
                             'id': tx2_id,
                             'customerId': referrer.id,
                             'customerName': ref_payload.get('name'),
-                            'customerPhone': ref_payload.get('phone'),
+                            'customerPhone': referrer.phone,
                             'amount': 50.0,
                             'type': 'reward',
                             'status': 'completed',
@@ -829,6 +1135,58 @@ def customers_endpoint(request):
 
     return Response({'success': True, 'customer': profile})
 
+
+@api_view(['PATCH'])
+def verify_customer_endpoint(request, customer_id):
+    auth = JWTAuthentication()
+    auth_res = auth.authenticate(request)
+    is_staff = False
+    user_name = 'system'
+    if auth_res:
+        user_obj, _ = auth_res
+        if user_obj.role in ['admin', 'manager']:
+            is_staff = True
+            user_name = user_obj.username
+
+    try:
+        cust = Customer.objects.get(id=customer_id)
+        p = cust.payload
+
+        # Check blocked
+        if p.get('status') == 'blocked':
+            return Response({'success': False, 'message': 'This account is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+        clean_phone = ''.join(c for c in cust.phone if c.isdigit())
+        if BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).exists():
+            return Response({'success': False, 'message': 'This mobile number is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if not is_staff:
+            otp_val = request.data.get('otp')
+            if not otp_val:
+                return Response({'success': False, 'message': 'OTP is required for verification.'}, status=status.HTTP_400_BAD_REQUEST)
+            if str(p.get('otp')) != str(otp_val):
+                return Response({'success': False, 'message': 'Incorrect OTP. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
+            # Check expiry
+            expiry = p.get('otpExpiry', 0)
+            if int(time.time() * 1000) > expiry:
+                return Response({'success': False, 'message': 'OTP has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mark as verified
+        import random
+        referral_code = p.get('referralCode') or f"REF{random.randint(100000, 999999)}"
+        p['verified'] = True
+        p['referralCode'] = referral_code
+        p.pop('otp', None)
+        p.pop('otpExpiry', None)
+        
+        cust.payload = p
+        cust.verified = True
+        cust.save()
+
+        log_security_event(request, f"Verified customer {customer_id} ({cust.phone}) by '{user_name}'")
+        return Response({'success': True, 'customer': p})
+    except Customer.DoesNotExist:
+        return Response({'success': False, 'message': 'Customer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
 # --- ORDER ENDPOINTS ---
 
 @api_view(['GET', 'POST'])
@@ -875,9 +1233,17 @@ def orders_endpoint(request):
     order['receivedAt'] = received_str
     order['status'] = order.get('status', 'new')
 
+    cust_phone = order.get('customerPhone')
+    if cust_phone:
+        clean_phone = ''.join(c for c in cust_phone if c.isdigit())
+        if BlockedCustomer.objects.filter(phone_hash=hash_phone(clean_phone)).exists():
+            return Response({'success': False, 'message': 'This account is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+        cust = Customer.objects.filter(Q(phone_hash=hash_phone(cust_phone)) | Q(phone_hash=hash_phone(clean_phone))).first()
+        if cust and cust.payload.get('status') == 'blocked':
+            return Response({'success': False, 'message': 'This account is permanently blocked.'}, status=status.HTTP_403_FORBIDDEN)
+
     # Security validation: COD must be verified
     is_cod = order.get('paymentMethod') == 'COD'
-    cust_phone = order.get('customerPhone')
     if is_cod and cust_phone:
         clean_phone = ''.join(c for c in cust_phone if c.isdigit())
         cust = Customer.objects.filter(Q(phone_hash=hash_phone(cust_phone)) | Q(phone_hash=hash_phone(clean_phone))).first()

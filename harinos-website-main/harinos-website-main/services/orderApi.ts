@@ -267,58 +267,106 @@ export const verifyCustomerLogin = async (
   return data;
 };
 
-export const verifyServerCustomer = async (customerId: string): Promise<CustomerProfile | null> => {
-  const localCusts = StorageService.getAdminCustomers();
-  const targetIdx = localCusts.findIndex((c) => c.id === customerId);
-  const target = targetIdx >= 0 ? localCusts[targetIdx] : null;
+export const verifyServerCustomer = async (customerId: string, otp?: string): Promise<CustomerProfile | null> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
 
-  const cleanPhone = (p: string) => p.replace(/\D/g, '');
-  const generateReferralCode = () => {
-    return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
-  };
+  const response = await fetch(`${apiBase}/customers/${encodeURIComponent(customerId)}/verify`, {
+    method: 'PATCH',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ otp }),
+  });
 
-  const localVerify = (): CustomerProfile | null => {
-    if (!target) return null;
-    const targetPhone = cleanPhone(target.phone);
-    const alreadyVerified = localCusts.some(
-      (c) => c.verified && c.id !== customerId && c.phone && cleanPhone(c.phone) === targetPhone
-    );
-    if (alreadyVerified) {
-      throw new Error(`Verification rejected: The mobile number ${target.phone} is already verified under another customer profile.`);
-    }
-    const referralCode = target.referralCode ?? generateReferralCode();
-    const updated = { ...target, verified: true, referralCode };
-    localCusts[targetIdx] = updated;
-    StorageService.saveAdminCustomers(localCusts);
-    return updated;
-  };
-
-  try {
-    if (!getApiBase()) return localVerify();
-    const response = await fetch(`${getApiBase()}/customers/${encodeURIComponent(customerId)}/verify`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.message || `Customer verification failed with status ${response.status}.`);
-    }
-    const data = (await response.json()) as { customer?: CustomerProfile };
-    const updated = data.customer ?? null;
-    if (updated) {
-      const idx = localCusts.findIndex((c) => c.id === customerId);
-      if (idx >= 0) {
-        localCusts[idx] = updated;
-      } else {
-        localCusts.push(updated);
-      }
-      StorageService.saveAdminCustomers(localCusts);
-    }
-    return updated;
-  } catch (error) {
-    console.warn('API verify customer failed, using local verify:', error);
-    return localVerify();
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `Customer verification failed with status ${response.status}.`);
   }
+
+  const data = (await response.json()) as { customer?: CustomerProfile };
+  const updated = data.customer ?? null;
+  if (updated) {
+    const localCusts = StorageService.getAdminCustomers();
+    const idx = localCusts.findIndex((c) => c.id === customerId);
+    if (idx >= 0) {
+      localCusts[idx] = updated;
+    } else {
+      localCusts.push(updated);
+    }
+    StorageService.saveAdminCustomers(localCusts);
+  }
+  return updated;
+};
+
+export const sendOtpToCustomer = async (customerId: string): Promise<any> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
+
+  const response = await fetch(`${apiBase}/customers?action=send-otp`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ customerId }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `Failed to send OTP.`);
+  }
+
+  return await response.json();
+};
+
+export const blockCustomerOnServer = async (customerId: string, blocked: boolean): Promise<any> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
+
+  const response = await fetch(`${apiBase}/customers?action=block`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ customerId, blocked }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `Failed to update block status.`);
+  }
+
+  return await response.json();
+};
+
+export const bulkRemoveCustomersFromServer = async (customerIds: string[]): Promise<any> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
+
+  const response = await fetch(`${apiBase}/customers?action=bulk-remove`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ customerIds }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `Failed bulk delete operation.`);
+  }
+
+  return await response.json();
+};
+
+export const mergeCustomersOnServer = async (primaryId: string, secondaryId: string): Promise<any> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
+
+  const response = await fetch(`${apiBase}/customers?action=merge`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ primaryId, secondaryId }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `Failed merge operation.`);
+  }
+
+  return await response.json();
 };
 
 // Polling-based Subscriptions for Offline/SSD Local Server Mode

@@ -247,6 +247,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
   };
 
   const verifyCustomer = async (customer: CustomerProfile) => {
+    if (!confirm(`Are you sure you want to verify customer "${customer.name}" manually?`)) {
+      return;
+    }
     try {
       const result = await verifyServerCustomer(customer.id);
       if (result) {

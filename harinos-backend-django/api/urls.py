@@ -22,6 +22,7 @@ urlpatterns = [
     
     # Customers
     path('customers', views.customers_endpoint, name='customers_endpoint'),
+    path('customers/<str:customer_id>/verify', views.verify_customer_endpoint, name='verify_customer_endpoint'),
     
     # Orders
     path('orders', views.orders_endpoint, name='orders_endpoint'),
