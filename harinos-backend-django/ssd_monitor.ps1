@@ -33,7 +33,15 @@ while ($true) {
             Write-Host "SSD detected at drive letter: $driveLetter. Starting services..." -ForegroundColor Green
             $currentDriveLetter = $driveLetter
 
-            # A. Update my.ini dynamically to match the current drive letter
+            # A. Stop conflicting local MySQL80 service on host laptop
+            $localMysql = Get-Service -Name "MySQL80" -ErrorAction SilentlyContinue
+            if ($localMysql -and $localMysql.Status -eq "Running") {
+                Write-Host "Stopping conflicting laptop MySQL80 service..." -ForegroundColor Yellow
+                Stop-Service -Name "MySQL80" -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+            }
+
+            # B. Update my.ini dynamically to match the current drive letter
             $myIniPath = Join-Path $ssdRoot "harinos-mysql\my.ini"
             if (Test-Path $myIniPath) {
                 Write-Host "Dynamically updating my.ini config paths..." -ForegroundColor Yellow
@@ -43,7 +51,7 @@ while ($true) {
                 $updatedIni | Set-Content $myIniPath
             }
 
-            # B. Launch MySQL Server
+            # C. Launch MySQL Server
             $mysqldPath = Join-Path $ssdRoot "harinos-mysql\bin\mysqld.exe"
             if (Test-Path $mysqldPath) {
                 $mysqlProcess = Get-Process -Name "mysqld" -ErrorAction SilentlyContinue
@@ -57,13 +65,17 @@ while ($true) {
                 Write-Host "Warning: Portable MySQL executable not found on SSD at $mysqldPath" -ForegroundColor Red
             }
 
-            # C. Run Django migrations and start server
+            # D. Run Django migrations, replay transaction recovery log, and start server
             $djangoManage = Join-Path $ssdRoot "manage.py"
             if (Test-Path $djangoManage) {
                 # Run migrations
                 Write-Host "Running database migrations..." -ForegroundColor Yellow
                 Start-Process -FilePath "python" -ArgumentList "$djangoManage migrate" -WorkingDirectory $ssdRoot -WindowStyle Hidden -Wait
                 
+                # Replay recovery logs
+                Write-Host "Replaying any pending transactions from recovery log..." -ForegroundColor Yellow
+                Start-Process -FilePath "python" -ArgumentList "$djangoManage replay_recovery_log" -WorkingDirectory $ssdRoot -WindowStyle Hidden -Wait
+
                 # Start Django server on port 8000
                 Write-Host "Starting Django server on 127.0.0.1:8000..." -ForegroundColor Green
                 Start-Process -FilePath "python" -ArgumentList "$djangoManage runserver 127.0.0.1:8000" -WorkingDirectory $ssdRoot -WindowStyle Hidden
@@ -93,6 +105,13 @@ while ($true) {
             $mList = Get-Process -Name "mysqld" -ErrorAction SilentlyContinue
             foreach ($m in $mList) {
                 Stop-Process -Id $m.Id -Force -ErrorAction SilentlyContinue
+            }
+
+            # Restart conflicting laptop MySQL80 service to restore original state
+            $localMysql = Get-Service -Name "MySQL80" -ErrorAction SilentlyContinue
+            if ($localMysql -and $localMysql.Status -ne "Running") {
+                Write-Host "Restarting laptop MySQL80 service..." -ForegroundColor Green
+                Start-Service -Name "MySQL80" -ErrorAction SilentlyContinue
             }
 
             $djangoRunning = $false

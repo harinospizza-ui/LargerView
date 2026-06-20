@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import pymysql
 
@@ -9,25 +10,39 @@ pymysql.install_as_MySQLdb()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env
-# Try loading from backend parent directory, then from root
+# Load local SSD configuration json if it exists
+config_path = BASE_DIR / 'harinos-config.json'
+if not config_path.exists():
+    config_path = BASE_DIR.parent / 'harinos-config.json'
+
+config_data = {}
+if config_path.exists():
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+    except Exception as e:
+        print("Warning: Failed to load harinos-config.json:", e)
+
+# Load environment variables from .env if present
 env_path = BASE_DIR / '.env'
 if not env_path.exists():
     env_path = BASE_DIR.parent / '.env'
 
 if env_path.exists():
-    from django.core.management.utils import get_random_secret_key
-    with open(env_path, 'r') as f:
-        for line in f:
-            if '=' in line and not line.startswith('#'):
-                k, v = line.strip().split('=', 1)
-                os.environ[k.strip()] = v.strip().strip('"').strip("'")
+    try:
+        with open(env_path, 'r') as f:
+            for line in f:
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.strip().split('=', 1)
+                    os.environ[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:
+        pass
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-l6sbcu)iw_u6a5#hx=)t_4oi+on@-_l@@&+ralcu=(go-!q92m')
+SECRET_KEY = config_data.get('DJANGO_SECRET_KEY', os.getenv('DJANGO_SECRET_KEY', 'django-insecure-l6sbcu)iw_u6a5#hx=)t_4oi+on@-_l@@&+ralcu=(go-!q92m'))
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+DEBUG = config_data.get('DEBUG', os.getenv('DEBUG', 'True') == 'True')
 
 ALLOWED_HOSTS = ['*']
 
@@ -81,11 +96,11 @@ WSGI_APPLICATION = 'harinos_backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('MYSQL_DATABASE', 'harinos_orders'),
-        'USER': os.getenv('MYSQL_USER', 'root'),
-        'PASSWORD': os.getenv('MYSQL_PASSWORD', ''),
-        'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
-        'PORT': os.getenv('MYSQL_PORT', '3306'),
+        'NAME': config_data.get('MYSQL_DATABASE', os.getenv('MYSQL_DATABASE', 'harinos_orders')),
+        'USER': config_data.get('MYSQL_USER', os.getenv('MYSQL_USER', 'root')),
+        'PASSWORD': config_data.get('MYSQL_PASSWORD', os.getenv('MYSQL_PASSWORD', '')),
+        'HOST': config_data.get('MYSQL_HOST', os.getenv('MYSQL_HOST', '127.0.0.1')),
+        'PORT': str(config_data.get('MYSQL_PORT', os.getenv('MYSQL_PORT', '3306'))),
         'OPTIONS': {
             'charset': 'utf8mb4',
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",

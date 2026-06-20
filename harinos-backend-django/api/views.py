@@ -8,6 +8,8 @@ from django.conf import settings
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from django.db.models import Q
+from django.db import transaction
+from .recovery_logger import log_transaction, complete_transaction
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
@@ -30,9 +32,20 @@ from firebase_admin import credentials, messaging
 
 def get_firebase_app():
     if not firebase_admin._apps:
+        project_id = os.getenv('FIREBASE_PROJECT_ID', 'harinos-12902')
+        
+        # Try loading from firebase_credentials.json on the SSD first (plug-and-play)
+        ssd_cred_path = os.path.join(settings.BASE_DIR, 'firebase_credentials.json')
+        if os.path.exists(ssd_cred_path):
+            try:
+                cred = credentials.Certificate(ssd_cred_path)
+                firebase_admin.initialize_app(cred, {'projectId': project_id})
+                return firebase_admin._apps
+            except Exception as e:
+                print("[-] Failed to load SSD firebase credentials, falling back:", e)
+
         encoded = os.getenv('FIREBASE_SERVICE_ACCOUNT_BASE64')
         raw = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
-        project_id = os.getenv('FIREBASE_PROJECT_ID', 'harinos-12902')
         try:
             if encoded:
                 import base64
@@ -435,28 +448,33 @@ def wallet_transactions(request):
     created_str = tx.get('createdAt') or datetime.utcnow().isoformat() + 'Z'
     tx['createdAt'] = created_str
 
-    WalletTransaction.objects.update_or_create(
-        id=tx_id,
-        defaults={
-            'payload': tx,
-            'created_at': parse_datetime(created_str) or timezone.now()
-        }
-    )
+    log_transaction(tx_id, 'wallet_transaction', tx)
 
-    # Update customer balance
-    cust_id = tx.get('customerId')
-    amount = float(tx.get('amount', 0))
-    if cust_id:
-        try:
-            cust = Customer.objects.get(id=cust_id)
-            payload = cust.payload
-            current_bal = float(payload.get('walletBalance', 0))
-            new_bal = current_bal + amount
-            payload['walletBalance'] = new_bal
-            cust.payload = payload
-            cust.save()
-        except Customer.DoesNotExist:
-            pass
+    with transaction.atomic():
+        WalletTransaction.objects.update_or_create(
+            id=tx_id,
+            defaults={
+                'payload': tx,
+                'created_at': parse_datetime(created_str) or timezone.now()
+            }
+        )
+
+        # Update customer balance
+        cust_id = tx.get('customerId')
+        amount = float(tx.get('amount', 0))
+        if cust_id:
+            try:
+                cust = Customer.objects.get(id=cust_id)
+                payload = cust.payload
+                current_bal = float(payload.get('walletBalance', 0))
+                new_bal = current_bal + amount
+                payload['walletBalance'] = new_bal
+                cust.payload = payload
+                cust.save()
+            except Customer.DoesNotExist:
+                pass
+
+    complete_transaction(tx_id)
 
     return Response({'success': True})
 
@@ -650,56 +668,65 @@ def customers_endpoint(request):
                     break
 
             if referrer:
-                # Apply Referral rewards!
-                # 1. Update target customer
-                p['referralCodeUsed'] = True
-                p['referralApplied'] = True
-                p['referralAppliedAt'] = datetime.utcnow().isoformat() + 'Z'
-                
-                # Reward: add Rs 50
-                p['walletBalance'] = float(p.get('walletBalance', 0)) + 50.0
-                cust.payload = p
-                cust.save()
+                ref_tx_id = f"tx_ref_apply_{customer_id}"
+                log_transaction(ref_tx_id, 'apply_referral', {
+                    'customerId': customer_id,
+                    'referralCode': referral_code
+                })
 
-                # 2. Update referrer customer
-                ref_payload = referrer.payload
-                ref_payload['walletBalance'] = float(ref_payload.get('walletBalance', 0)) + 50.0
-                referrer.payload = ref_payload
-                referrer.save()
+                with transaction.atomic():
+                    # Apply Referral rewards!
+                    # 1. Update target customer
+                    p['referralCodeUsed'] = True
+                    p['referralApplied'] = True
+                    p['referralAppliedAt'] = datetime.utcnow().isoformat() + 'Z'
+                    
+                    # Reward: add Rs 50
+                    p['walletBalance'] = float(p.get('walletBalance', 0)) + 50.0
+                    cust.payload = p
+                    cust.save()
 
-                # 3. Create wallet transaction logs
-                now_str = datetime.utcnow().isoformat() + 'Z'
-                tx1_id = f"tx_ref1_{int(time.time()*1000)}"
-                WalletTransaction.objects.create(
-                    id=tx1_id,
-                    created_at=timezone.now(),
-                    payload={
-                        'id': tx1_id,
-                        'customerId': cust.id,
-                        'customerName': p.get('name'),
-                        'customerPhone': p.get('phone'),
-                        'amount': 50.0,
-                        'type': 'reward',
-                        'status': 'completed',
-                        'createdAt': now_str
-                    }
-                )
+                    # 2. Update referrer customer
+                    ref_payload = referrer.payload
+                    ref_payload['walletBalance'] = float(ref_payload.get('walletBalance', 0)) + 50.0
+                    referrer.payload = ref_payload
+                    referrer.save()
 
-                tx2_id = f"tx_ref2_{int(time.time()*1000)}"
-                WalletTransaction.objects.create(
-                    id=tx2_id,
-                    created_at=timezone.now(),
-                    payload={
-                        'id': tx2_id,
-                        'customerId': referrer.id,
-                        'customerName': ref_payload.get('name'),
-                        'customerPhone': ref_payload.get('phone'),
-                        'amount': 50.0,
-                        'type': 'reward',
-                        'status': 'completed',
-                        'createdAt': now_str
-                    }
-                )
+                    # 3. Create wallet transaction logs
+                    now_str = datetime.utcnow().isoformat() + 'Z'
+                    tx1_id = f"tx_ref1_{int(time.time()*1000)}"
+                    WalletTransaction.objects.create(
+                        id=tx1_id,
+                        created_at=timezone.now(),
+                        payload={
+                            'id': tx1_id,
+                            'customerId': cust.id,
+                            'customerName': p.get('name'),
+                            'customerPhone': p.get('phone'),
+                            'amount': 50.0,
+                            'type': 'reward',
+                            'status': 'completed',
+                            'createdAt': now_str
+                        }
+                    )
+
+                    tx2_id = f"tx_ref2_{int(time.time()*1000)}"
+                    WalletTransaction.objects.create(
+                        id=tx2_id,
+                        created_at=timezone.now(),
+                        payload={
+                            'id': tx2_id,
+                            'customerId': referrer.id,
+                            'customerName': ref_payload.get('name'),
+                            'customerPhone': ref_payload.get('phone'),
+                            'amount': 50.0,
+                            'type': 'reward',
+                            'status': 'completed',
+                            'createdAt': now_str
+                        }
+                    )
+
+                complete_transaction(ref_tx_id)
 
                 return Response({'success': True, 'message': 'Referral code applied successfully!', 'customer': p})
             else:
@@ -814,17 +841,22 @@ def orders_endpoint(request):
         if not cust or not cust.verified:
             return Response({'success': False, 'message': 'Cash On Delivery is available only for verified customers.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    Order.objects.update_or_create(
-        id=order_id,
-        defaults={
-            'payload': order,
-            'status': order['status'],
-            'received_at': parse_datetime(received_str) or timezone.now(),
-            'outlet_id': order.get('outletId'),
-            'customer_phone': order.get('customerPhone'),
-            'total': float(order.get('total', 0))
-        }
-    )
+    log_transaction(order_id, 'order_placement', order)
+
+    with transaction.atomic():
+        Order.objects.update_or_create(
+            id=order_id,
+            defaults={
+                'payload': order,
+                'status': order['status'],
+                'received_at': parse_datetime(received_str) or timezone.now(),
+                'outlet_id': order.get('outletId'),
+                'customer_phone': order.get('customerPhone'),
+                'total': float(order.get('total', 0))
+            }
+        )
+
+    complete_transaction(order_id)
 
     # Trigger New Order Push Notifications to Staff/Managers
     try:
@@ -871,9 +903,10 @@ def order_detail(request, order_id):
 
     # Append to audit trail
     trail = p.get('auditTrail', [])
+    updated_by = request.user.username if hasattr(request.user, 'username') else 'system'
     trail.append({
         'timestamp': datetime.utcnow().isoformat() + 'Z',
-        'updatedBy': request.user.username if hasattr(request.user, 'username') else 'system',
+        'updatedBy': updated_by,
         'action': f"Status updated from {old_status} to {new_status}",
         'previousStatus': old_status,
         'newStatus': new_status,
@@ -883,7 +916,20 @@ def order_detail(request, order_id):
 
     ord_obj.payload = p
     ord_obj.status = new_status
-    ord_obj.save()
+
+    # Log status update transaction before DB write
+    patch_tx_id = f"tx_patch_status_{order_id}_{int(time.time()*1000)}"
+    log_transaction(patch_tx_id, 'order_status_update', {
+        'orderId': order_id,
+        'status': new_status,
+        'reason': reason,
+        'updatedBy': updated_by
+    })
+
+    with transaction.atomic():
+        ord_obj.save()
+
+    complete_transaction(patch_tx_id)
 
     # Send Notification to Customer
     try:
