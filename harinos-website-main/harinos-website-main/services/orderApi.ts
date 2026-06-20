@@ -26,11 +26,34 @@ import { StorageService } from './storage';
 
 const isFirebaseClientConfigured = () => false;
 
-const API_BASE_URL = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
+let dynamicApiUrl = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
+
+const checkLocalServer = async () => {
+  try {
+    const res = await window.fetch('http://127.0.0.1:8000/api/settings', { method: 'GET', mode: 'cors' });
+    if (res.ok) {
+      dynamicApiUrl = 'http://127.0.0.1:8000/api';
+    } else {
+      dynamicApiUrl = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
+    }
+  } catch (e) {
+    dynamicApiUrl = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
+  }
+};
+
+// Check immediately on load and then periodically
+checkLocalServer();
+if (typeof window !== 'undefined') {
+  setInterval(checkLocalServer, 5000);
+}
 
 const originalFetch = window.fetch;
 const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const response = await originalFetch(input, init);
+  let targetInput = input;
+  if (typeof input === 'string' && input.startsWith('/api') && dynamicApiUrl.startsWith('http')) {
+    targetInput = dynamicApiUrl + input.substring(4);
+  }
+  const response = await originalFetch(targetInput, init);
   if (response.status === 401) {
     const session = StorageService.getAdminSession();
     if (session) {
@@ -42,7 +65,7 @@ const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   return response;
 };
 
-const getApiBase = (): string | null => API_BASE_URL || null;
+const getApiBase = (): string | null => dynamicApiUrl || null;
 export const isOrderApiConfigured = (): boolean => isFirebaseClientConfigured() || Boolean(getApiBase());
 
 const getAuthHeaders = (): Record<string, string> => {
