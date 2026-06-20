@@ -63,7 +63,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const docId = `${payload.userId}_${tokenHash}`;
     const now = new Date().toISOString();
 
-    // 1. Write to Firestore (FCM token storage)
     await db.collection('notification_tokens').doc(docId).set(
       {
         id: docId,
@@ -83,24 +82,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       { merge: true }
     );
-
-    // 2. Synchronize token with separate Django API backend
-    const backendUrl = process.env.BACKEND_API_URL;
-    if (backendUrl) {
-      const cleanBase = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
-      const syncUrl = `${cleanBase}/api/notifications`;
-      try {
-        await fetch(syncUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-      } catch (err) {
-        console.error('Failed to sync notification token to Django backend:', err);
-      }
-    }
 
     res.status(201).json({
       success: true,

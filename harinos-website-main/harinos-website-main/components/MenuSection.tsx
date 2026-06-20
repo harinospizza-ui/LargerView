@@ -176,22 +176,24 @@ const MenuSection: React.FC<MenuSectionProps> = ({ items, onAddToCart, offers, c
   const pizzas = items.filter((item) => item.category === Category.PIZZA);
   
   // Pizza subcategories/series
-  const cheesePizzas = pizzas.filter((item) => item.id.startsWith('p1_'));
-  const makhniPizzas = pizzas.filter((item) => item.id.startsWith('makhni_'));
-  const tandooriPizzas = pizzas.filter((item) => item.id.startsWith('tandoori_') || item.id === 'p2_tp');
-  const specialPizzas = pizzas.filter((item) => item.id === 'p_hs');
+  const cheesePizzas = pizzas.filter((item) => item.id.startsWith('p1_') || item.id === 'p1_co' || item.id === 'p1_t' || item.id === 'p1_cap' || item.id === 'p1_corn' || item.id === 'p1_p');
+  const paneerPizzas = pizzas.filter((item) => item.id.startsWith('p2_') || item.id === 'p2_tp' || item.id === 'p2_pm' || item.id === 'p2_tkp' || item.id === 'p2_up');
+  const vegPizzas = pizzas.filter((item) => item.id.startsWith('p3_') || item.id === 'p3_mt' || item.id === 'p3_vo');
+  const crunchPizzas = pizzas.filter((item) => item.id.startsWith('p4_') || item.id === 'p4_mc' || item.id === 'p4_cs' || item.id === 'p4_vl');
+  const signaturePizzas = pizzas.filter((item) => item.id === 'p_hs');
+  
   const otherPizzas = pizzas.filter(
     (item) =>
-      !item.id.startsWith('p1_') &&
-      !item.id.startsWith('makhni_') &&
-      !item.id.startsWith('tandoori_') &&
-      item.id !== 'p2_tp' &&
-      item.id !== 'p_hs'
+      !cheesePizzas.includes(item) &&
+      !paneerPizzas.includes(item) &&
+      !vegPizzas.includes(item) &&
+      !crunchPizzas.includes(item) &&
+      !signaturePizzas.includes(item)
   );
 
   const momosFries = items.filter((item) => item.category === Category.MOMOS_FRIES);
-  const momos = momosFries.filter((item) => item.name.toLowerCase().includes('momo'));
-  const fries = momosFries.filter((item) => item.name.toLowerCase().includes('fry') || item.name.toLowerCase().includes('fries'));
+  const momos = momosFries.filter((item) => item.id.startsWith('m') || item.name.toLowerCase().includes('momo'));
+  const fries = momosFries.filter((item) => !momos.includes(item));
 
   const burgers = items.filter((item) => item.category === Category.BURGERS);
   const sides = items.filter((item) => item.category === Category.SIDES);
@@ -203,10 +205,11 @@ const MenuSection: React.FC<MenuSectionProps> = ({ items, onAddToCart, offers, c
       {pizzas.length > 0 && (
         <>
           <MenuRow title="Cheese Series" items={cheesePizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
-          <MenuRow title="Makhni Series" items={makhniPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
-          <MenuRow title="Tandoori Series" items={tandooriPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
-          <MenuRow title="Harino's Special" items={specialPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
-          <MenuRow title="Veg & Paneer Specials" items={otherPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
+          <MenuRow title="Paneer Specials" items={paneerPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
+          <MenuRow title="Veg Specials" items={vegPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
+          <MenuRow title="Crunch & Fusion" items={crunchPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
+          <MenuRow title="Harino's Signature" items={signaturePizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
+          <MenuRow title="Other Pizzas" items={otherPizzas} offers={offers} cartSubtotal={cartSubtotal} onAddToCart={onAddToCart} />
         </>
       )}
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MenuItem, Category, AdminSession, OutletConfig, OfferCard, Order } from '../types';
 import { saveMenuItemToServer, saveOutletToServer, saveOfferToServer, deleteOutletFromServer } from '../services/orderApi';
+import { MENU_ITEMS } from '../constants';
 
 interface AdminMenuProps {
   session: AdminSession;
@@ -23,6 +24,47 @@ export const AdminMenu: React.FC<AdminMenuProps> = ({
 }) => {
   // Menu Item Form State
   const [isAddingItem, setIsAddingItem] = useState(false);
+
+  const auditWarnings = React.useMemo(() => {
+    const warnings: string[] = [];
+    const dbItemMap = new Map<string, MenuItem>();
+    const dbItemCounts = new Map<string, number>();
+
+    menuItems.forEach((item) => {
+      dbItemMap.set(item.id, item);
+      dbItemCounts.set(item.id, (dbItemCounts.get(item.id) || 0) + 1);
+
+      // Check database item fields
+      if (!item.category) {
+        warnings.push(`Database item "${item.name}" (ID: ${item.id}) is missing a category.`);
+      }
+      if (!item.image) {
+        warnings.push(`Database item "${item.name}" (ID: ${item.id}) is missing an image path.`);
+      }
+    });
+
+    // 1. Check for duplicates in db menuItems
+    dbItemCounts.forEach((count, id) => {
+      if (count > 1) {
+        warnings.push(`Duplicate database entry found for item ID "${id}" (${count} times).`);
+      }
+    });
+
+    // 2. Loop through static MENU_ITEMS to check status
+    MENU_ITEMS.forEach((staticItem) => {
+      const dbItem = dbItemMap.get(staticItem.id);
+      if (!dbItem) {
+        warnings.push(`Static item "${staticItem.name}" (ID: ${staticItem.id}) is missing from the database.`);
+      } else {
+        const validCategories = Object.values(Category);
+        if (dbItem.available && !validCategories.includes(dbItem.category)) {
+          warnings.push(`Item "${dbItem.name}" (ID: ${dbItem.id}) is marked available but has an invalid category "${dbItem.category}", hiding it from the customer menu.`);
+        }
+      }
+    });
+
+    return warnings;
+  }, [menuItems]);
 
   // Outlet Form State
   const [editingOutlet, setEditingOutlet] = useState<OutletConfig | null>(null);
@@ -105,6 +147,19 @@ export const AdminMenu: React.FC<AdminMenuProps> = ({
     return (
       <section className="relative mx-auto max-w-6xl p-4 animate-fade-in">
         <h3 className="mb-4 font-display text-2xl font-bold">Dynamic Menu Management</h3>
+
+        {auditWarnings.length > 0 && (
+          <div className="mb-6 p-4 rounded-3xl border border-red-500/20 bg-red-950/20 text-red-200 text-xs font-bold space-y-1.5 shadow-lg shadow-red-950/30">
+            <h4 className="text-sm font-black uppercase tracking-wider flex items-center gap-2 text-red-300">
+              ⚠️ Menu Configuration Warnings ({auditWarnings.length})
+            </h4>
+            <ul className="list-disc pl-5 space-y-1">
+              {auditWarnings.map((warn, i) => (
+                <li key={i}>{warn}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         
         {/* Add Menu Item Panel */}
         <div className="mb-6 rounded-3xl border border-white/10 bg-white/[0.02] p-5 shadow-lg">

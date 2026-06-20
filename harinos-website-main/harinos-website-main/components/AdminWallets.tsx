@@ -421,7 +421,11 @@ export const AdminWallets: React.FC<AdminWalletsProps> = ({
                         Send OTP
                       </button>
                       <button
-                        onClick={() => onVerifyCustomer(customer)}
+                        onClick={() => {
+                          if (confirm("Are you sure you want to verify this customer manually?")) {
+                            onVerifyCustomer(customer);
+                          }
+                        }}
                         className="rounded-xl bg-red-650 hover:bg-red-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-premium active:scale-95 cursor-pointer animate-fade-in"
                       >
                         Verify Manually

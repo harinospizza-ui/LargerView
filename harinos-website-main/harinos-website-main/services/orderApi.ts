@@ -5,25 +5,6 @@ export type Unsubscribe = () => void;
 
 let dynamicApiUrl = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
 
-const checkLocalServer = async () => {
-  try {
-    const res = await window.fetch('http://127.0.0.1:8000/api/settings', { method: 'GET', mode: 'cors' });
-    if (res.ok) {
-      dynamicApiUrl = 'http://127.0.0.1:8000/api';
-    } else {
-      dynamicApiUrl = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
-    }
-  } catch (e) {
-    dynamicApiUrl = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
-  }
-};
-
-// Check immediately on load and then periodically
-checkLocalServer();
-if (typeof window !== 'undefined') {
-  setInterval(checkLocalServer, 5000);
-}
-
 const originalFetch = window.fetch;
 const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   let targetInput = input;
