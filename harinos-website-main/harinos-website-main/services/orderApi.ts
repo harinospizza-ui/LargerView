@@ -911,4 +911,62 @@ export const getFirestoreUsage = async (): Promise<any[]> => {
   return data.usage || [];
 };
 
+export interface BackupDetail {
+  filename: string;
+  size: string;
+  createdAt: string;
+  location: string;
+  status: string;
+}
+
+export interface BackupStatusResponse {
+  success: boolean;
+  backups: BackupDetail[];
+  lastBackupTime: string;
+  lastBackupSize: string;
+  lastBackupStatus: string;
+  lastBackupLocation: string;
+}
+
+export const getBackupStatus = async (): Promise<BackupStatusResponse> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('API is not configured.');
+  const response = await fetch(`${apiBase}/admin/backup`, {
+    headers: getAuthHeaders(),
+    cache: 'no-store'
+  });
+  if (!response.ok) throw new Error('Failed to load backup status.');
+  return (await response.json()) as BackupStatusResponse;
+};
+
+export const triggerDatabaseBackup = async (): Promise<any> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('API is not configured.');
+  const response = await fetch(`${apiBase}/admin/backup`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to trigger database backup.');
+  }
+  return await response.json();
+};
+
+export const triggerDatabaseRestore = async (filename: string): Promise<any> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('API is not configured.');
+  const response = await fetch(`${apiBase}/admin/restore`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ filename })
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to restore database from backup.');
+  }
+  return await response.json();
+};
+
+
 

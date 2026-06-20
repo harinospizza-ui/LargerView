@@ -1,0 +1,3 @@
+HARINOS_PIZZA_HYBRID_STORAGE_SSD_MARKER_FILE
+DO NOT DELETE THIS FILE.
+This file allows the Harino's Pizza database monitor to identify this drive letter and start database services automatically.

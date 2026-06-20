@@ -17,6 +17,10 @@ import {
   subscribeServerWalletTransactions,
   getServerSettings,
   saveSettingsToServer,
+  getBackupStatus,
+  triggerDatabaseBackup,
+  triggerDatabaseRestore,
+
 } from '../services/orderApi';
 import { StorageService } from '../services/storage';
 import { notifyCustomerStatusChange } from '../services/notificationService';
@@ -28,6 +32,7 @@ import { AdminWallets } from './AdminWallets';
 import { AdminMenu } from './AdminMenu';
 import { AdminDashboard } from './AdminDashboard';
 import { AdminUsage } from './AdminUsage';
+import { AdminBackup } from './AdminBackup';
 
 interface AdminPanelProps {
   session: AdminSession | null;
@@ -118,7 +123,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<CustomerProfile[]>([]);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'orders' | 'wallets' | 'menu' | 'outlets' | 'offers' | 'dashboard' | 'settings' | 'usage'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'wallets' | 'menu' | 'outlets' | 'offers' | 'dashboard' | 'settings' | 'usage' | 'backup'>('orders');
   const [instagramUrlInput, setInstagramUrlInput] = useState('');
 
 
@@ -380,10 +385,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
           </>
         )}
         {session.role === 'admin' && (
-          <button onClick={() => setActiveTab('usage')} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium ${activeTab === 'usage' ? 'bg-gradient-premium border-red-500/30 text-white' : 'bg-white/[0.03] border-white/5 text-slate-400'}`}>
-            Cost Usage
-          </button>
+          <>
+            <button onClick={() => setActiveTab('usage')} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium ${activeTab === 'usage' ? 'bg-gradient-premium border-red-500/30 text-white' : 'bg-white/[0.03] border-white/5 text-slate-400'}`}>
+              Cost Usage
+            </button>
+            <button onClick={() => setActiveTab('backup')} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium ${activeTab === 'backup' ? 'bg-gradient-premium border-red-500/30 text-white' : 'bg-white/[0.03] border-white/5 text-slate-400'}`}>
+              Backup & Restore
+            </button>
+          </>
         )}
+
       </div>
 
       <div className="pb-12">
@@ -425,6 +436,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
         )}
         {activeTab === 'usage' && session.role === 'admin' && (
           <AdminUsage />
+        )}
+        {activeTab === 'backup' && session.role === 'admin' && (
+          <AdminBackup session={session} />
         )}
         {activeTab === 'settings' && session.role !== 'staff' && (
           <div className="mx-auto max-w-xl px-4 mt-6">
