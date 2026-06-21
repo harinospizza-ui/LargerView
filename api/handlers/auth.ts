@@ -60,6 +60,26 @@ const DEFAULT_STAFF = [
   { role: 'staff', username: 'Staff_Harinos', password: 'Harinos_Staff', outletId: null },
 ];
 
+const cleanStaleSessions = async (db: admin.firestore.Firestore) => {
+  try {
+    const threshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(); // 24 hours ago
+    const staleSnap = await db.collection('userSessions')
+      .where('lastActivity', '<', threshold)
+      .get();
+    
+    if (!staleSnap.empty) {
+      const batch = db.batch();
+      staleSnap.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+      console.log(`[Session Cleanup] Cleaned up ${staleSnap.size} stale sessions.`);
+    }
+  } catch (err) {
+    console.warn('[Session Cleanup] Failed to clean stale sessions:', err);
+  }
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
@@ -89,27 +109,106 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
+      const now = new Date().toISOString();
+
+      // Clear invalid stale session data automatically
+      await cleanStaleSessions(db);
+
       const staffRef = db.collection('users');
       const snapshot = await staffRef.get();
       
+      // Auto-migrate/repair check for all users
+      const migrationBatch = db.batch();
+      let migrationRequired = false;
+
       if (snapshot.empty) {
         for (const user of DEFAULT_STAFF) {
-          const hashedUser = { ...user, password: hashPassword(user.password) };
-          await staffRef.doc(user.username).set(hashedUser);
+          const hashedUser = {
+            uid: user.username,
+            username: user.username,
+            role: user.role,
+            password: hashPassword(user.password),
+            outletId: user.outletId,
+            active: true,
+            createdAt: now,
+            lastLogin: now
+          };
+          migrationBatch.set(staffRef.doc(user.username), hashedUser);
+          migrationRequired = true;
+        }
+      } else {
+        snapshot.docs.forEach(docDoc => {
+          const data = docDoc.data();
+          const docId = docDoc.id;
+          let changed = false;
+          const updatedFields: any = {};
+
+          if (!data.uid) { updatedFields.uid = docId; changed = true; }
+          if (!data.username) { updatedFields.username = docId; changed = true; }
+          if (!data.role) { updatedFields.role = 'staff'; changed = true; }
+          if (data.active === undefined) { updatedFields.active = true; changed = true; }
+          if (!data.createdAt) { updatedFields.createdAt = now; changed = true; }
+          if (!data.lastLogin) { updatedFields.lastLogin = now; changed = true; }
+
+          if (changed) {
+            migrationBatch.set(docDoc.ref, updatedFields, { merge: true });
+            migrationRequired = true;
+          }
+        });
+      }
+
+      if (migrationRequired) {
+        await migrationBatch.commit();
+        if (process.env.DEBUG_AUTH === 'true') {
+          console.log('[DEBUG_AUTH] Firestore users profiles successfully repaired/migrated.');
         }
       }
       
       const userDoc = await staffRef.doc(username).get();
       if (!userDoc.exists) {
-        await logSecurityEvent('FAILED_LOGIN', username, 'Non-existent user attempt', clientIp);
-        res.status(401).json({ success: false, message: 'Invalid username or password.' });
+        await logSecurityEvent('FAILED_LOGIN_USER_NOT_FOUND', username, 'Non-existent user attempt', clientIp);
+        if (process.env.DEBUG_AUTH === 'true') {
+          console.warn(`[DEBUG_AUTH] Login failed for ${username}: User not found.`);
+        }
+        res.status(401).json({ success: false, message: 'User not found' });
         return;
       }
       
       const user = userDoc.data() as any;
+
+      if (user.active === false) {
+        await logSecurityEvent('FAILED_LOGIN_ACCOUNT_DISABLED', username, 'Disabled user attempt', clientIp);
+        if (process.env.DEBUG_AUTH === 'true') {
+          console.warn(`[DEBUG_AUTH] Login failed for ${username}: Account disabled.`);
+        }
+        res.status(403).json({ success: false, message: 'Account disabled' });
+        return;
+      }
+
+      if (!user.role) {
+        await logSecurityEvent('FAILED_LOGIN_ROLE_NOT_ASSIGNED', username, 'Missing role attempt', clientIp);
+        if (process.env.DEBUG_AUTH === 'true') {
+          console.warn(`[DEBUG_AUTH] Login failed for ${username}: Role not assigned.`);
+        }
+        res.status(403).json({ success: false, message: 'Role not assigned' });
+        return;
+      }
+
+      if (!user.password) {
+        await logSecurityEvent('FAILED_LOGIN_PROFILE_MISSING', username, 'Missing password profile', clientIp);
+        if (process.env.DEBUG_AUTH === 'true') {
+          console.warn(`[DEBUG_AUTH] Login failed for ${username}: Password profile missing.`);
+        }
+        res.status(401).json({ success: false, message: 'Profile missing' });
+        return;
+      }
+
       if (!verifyPassword(password, user.password)) {
-        await logSecurityEvent('FAILED_LOGIN', username, 'Invalid password attempt', clientIp);
-        res.status(401).json({ success: false, message: 'Invalid username or password.' });
+        await logSecurityEvent('FAILED_LOGIN_INCORRECT_PASSWORD', username, 'Invalid password attempt', clientIp);
+        if (process.env.DEBUG_AUTH === 'true') {
+          console.warn(`[DEBUG_AUTH] Login failed for ${username}: Incorrect password.`);
+        }
+        res.status(401).json({ success: false, message: 'Incorrect password' });
         return;
       }
 
@@ -120,6 +219,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         user.password = hashed;
         await logSecurityEvent('PASSWORD_UPGRADED_TO_HASH', username, 'Migrated plaintext password to pbkdf2 hash', clientIp);
       }
+
+      // Update lastLogin time
+      await staffRef.doc(username).update({ lastLogin: now });
 
       const token = generateToken({ username: user.username, role: user.role, outletId: user.outletId }, getJWTSecret());
       await logSecurityEvent('SUCCESSFUL_LOGIN', username, `Role: ${user.role}`, clientIp);
@@ -132,7 +234,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       
       const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const now = new Date().toISOString();
 
       if (user.role === 'admin' || user.role === 'manager') {
         const docId = user.username;

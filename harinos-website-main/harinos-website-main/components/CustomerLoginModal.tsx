@@ -15,7 +15,6 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [customerId, setCustomerId] = useState('');
-  const [demoOtp, setDemoOtp] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
@@ -63,11 +62,6 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
         }
         
         if (result.customerId) setCustomerId(result.customerId);
-        if (result.otp) {
-          setDemoOtp(result.otp);
-          // Show alert matching existing admin OTP behavior
-          alert(`[Harino's Pizza] Your verification OTP is: ${result.otp}`);
-        }
       } else {
         setError(result.message || 'Failed to send OTP. Please try again.');
       }
@@ -251,11 +245,6 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
                 disabled={loading}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 font-black text-slate-900 outline-none focus:border-red-500 focus:bg-white transition-all text-center tracking-[0.6em] text-lg font-mono"
               />
-              {demoOtp && (
-                <div className="mt-2 text-center text-[10px] font-black uppercase tracking-wider text-emerald-600 bg-emerald-50 py-1.5 rounded-xl border border-emerald-100">
-                  Demo OTP: {demoOtp}
-                </div>
-              )}
             </div>
             
             <button

@@ -319,8 +319,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const otpText = `Your Harino's Pizza verification code is: ${otp}. Valid for 10 minutes.`;
         const waResult = await sendWhatsAppMessage(customerData.phone, otpText);
         
-        console.log(`[WhatsApp OTP - Admin Triggered] Sent OTP ${otp} to ${customerData.phone}`);
-        
         if (!waResult.success) {
           res.status(502).json({ success: false, message: waResult.message });
           return;
@@ -543,8 +541,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const otpText = `Your Harino's Pizza verification code is: ${otp}. Valid for 10 minutes.`;
           const waResult = await sendWhatsAppMessage(phone, otpText);
           
-          console.log(`[WhatsApp OTP - Login] Sent OTP ${otp} to ${phone}`);
-          
           if (!waResult.success) {
             await trackUsage({ reads: totalReads, customersReads: totalReads });
             res.status(502).json({
@@ -595,8 +591,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           const otpText = `Your Harino's Pizza verification code is: ${otp}. Valid for 10 minutes.`;
           const waResult = await sendWhatsAppMessage(phone, otpText);
-          
-          console.log(`[WhatsApp OTP - Register] Sent OTP ${otp} to ${phone}`);
           
           if (!waResult.success) {
             await trackUsage({ reads: totalReads, customersReads: totalReads });
