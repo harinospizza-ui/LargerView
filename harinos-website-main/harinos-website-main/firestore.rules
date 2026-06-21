@@ -2,37 +2,43 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Orders Collection Rules: Block all direct client SDK reads/writes
+    // Check if the authenticated user is an Admin or Manager
+    function isAdminOrManager() {
+      return request.auth != null && (request.auth.uid == 'Admin_Harinos' || request.auth.uid == 'Manager_Harinos');
+    }
+
+    // Orders Collection Rules: Authenticated users (admin, manager, staff) can read
     match /orders/{orderId} {
-      allow read, write, delete: if false;
+      allow read: if request.auth != null;
+      allow write, delete: if false;
     }
 
-    // Customers Collection Rules: Block all direct client SDK reads/writes
+    // Customers Collection Rules: Admin/Manager can read/write
     match /customers/{customerId} {
-      allow read, write, delete: if false;
+      allow read, write, delete: if isAdminOrManager();
     }
 
-    // Wallet Transactions Rules: Block all direct client SDK reads/writes
+    // Wallet Transactions Rules: Admin/Manager can read/write
     match /wallet_transactions/{transactionId} {
-      allow read, write, delete: if false;
+      allow read, write, delete: if isAdminOrManager();
     }
 
-    // Menu Items Rules: Read-only for public, writes must go through API (blocked on client SDK)
+    // Menu Items Rules: Read-only for public, writes for Admins/Managers
     match /menu_items/{itemId} {
       allow read: if true;
-      allow write, delete: if false;
+      allow write, delete: if isAdminOrManager();
     }
 
-    // Outlets Rules: Read-only for public, writes must go through API (blocked on client SDK)
+    // Outlets Rules: Read-only for public, writes for Admins/Managers
     match /outlets/{outletId} {
       allow read: if true;
-      allow write, delete: if false;
+      allow write, delete: if isAdminOrManager();
     }
 
-    // Offers Rules: Read-only for public, writes must go through API (blocked on client SDK)
+    // Offers Rules: Read-only for public, writes for Admins/Managers
     match /offers/{offerId} {
       allow read: if true;
-      allow write, delete: if false;
+      allow write, delete: if isAdminOrManager();
     }
 
     // Users Rules: Block all direct client SDK reads/writes
@@ -40,9 +46,10 @@ service cloud.firestore {
       allow read, write, delete: if false;
     }
 
-    // Notification Tokens Rules: Block all direct client SDK reads/writes
+    // Notification Tokens Rules: Admin/Manager can read (for getNotificationDashboardData counting)
     match /notification_tokens/{tokenId} {
-      allow read, write, delete: if false;
+      allow read: if isAdminOrManager();
+      allow write, delete: if false;
     }
 
     // Notification Log Rules: Block all direct client SDK reads/writes
@@ -55,15 +62,22 @@ service cloud.firestore {
       allow read, write, delete: if false;
     }
 
-    // Settings Rules: Read-only for public, writes must go through API (blocked on client SDK)
+    // Settings Rules: Read-only for public, writes for Admins/Managers
     match /settings/{settingsId} {
       allow read: if true;
+      allow write, delete: if isAdminOrManager();
+    }
+
+    // Firestore Usage Log Rules: Admin/Manager can read
+    match /firestore_usage/{usageId} {
+      allow read: if isAdminOrManager();
       allow write, delete: if false;
     }
 
-    // Firestore Usage Log Rules: Block all direct client SDK reads/writes
-    match /firestore_usage/{usageId} {
-      allow read, write, delete: if false;
+    // Notification Stats Rules: Admin/Manager can read
+    match /notification_stats/{statsId} {
+      allow read: if isAdminOrManager();
+      allow write, delete: if false;
     }
 
     // User Sessions Rules: Read-only for owners authenticated via Firebase Auth custom token

@@ -4,23 +4,6 @@
   "outputDirectory": "harinos-website-main/harinos-website-main/dist",
   "cleanUrls": true,
   "routes": [
-    { "src": "/api/auth/login", "dest": "/api/auth" },
-    { "src": "/api/auth/change-password", "dest": "/api/auth" },
-    { "src": "/api/orders/([^/]+)/status", "dest": "/api/orders?orderId=$1&action=status" },
-    { "src": "/api/orders/([^/]+)", "dest": "/api/orders?orderId=$1" },
-    { "src": "/api/orders", "dest": "/api/orders" },
-    { "src": "/api/customers/([^/]+)/verify", "dest": "/api/customers?customerId=$1&action=verify" },
-    { "src": "/api/customers", "dest": "/api/customers" },
-    { "src": "/api/wallet/transactions", "dest": "/api/wallet" },
-    { "src": "/api/menu-items/seed", "dest": "/api/menu-items?action=seed" },
-    { "src": "/api/menu-items", "dest": "/api/menu-items" },
-    { "src": "/api/outlets/seed", "dest": "/api/outlets?action=seed" },
-    { "src": "/api/outlets", "dest": "/api/outlets" },
-    { "src": "/api/offers/seed", "dest": "/api/offers?action=seed" },
-    { "src": "/api/offers", "dest": "/api/offers" },
-    { "src": "/api/settings", "dest": "/api/settings" },
-    { "src": "/api/auth/logout", "dest": "/api/auth" },
-    { "src": "/api/notifications/dashboard", "dest": "/api/notifications?action=dashboard" },
-    { "src": "/api/notifications/token", "dest": "/api/notifications" }
+    { "src": "/api/(.*)", "dest": "/api/index.ts" }
   ]
 }

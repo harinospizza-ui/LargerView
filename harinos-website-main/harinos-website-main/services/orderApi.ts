@@ -1,5 +1,16 @@
 import { CustomerProfile, Order, OrderStatus, MenuItem, OutletConfig, OfferCard, WalletTransaction, AppSettings } from '../types';
 import { StorageService } from './storage';
+import {
+  db,
+  FIRESTORE_ORDERS_COLLECTION,
+  FIRESTORE_CUSTOMERS_COLLECTION,
+  FIRESTORE_MENU_ITEMS_COLLECTION,
+  FIRESTORE_OUTLETS_COLLECTION,
+  FIRESTORE_OFFERS_COLLECTION,
+  FIRESTORE_WALLET_TRANSACTIONS_COLLECTION,
+  FIRESTORE_NOTIFICATION_TOKENS_COLLECTION
+} from './firebaseClient';
+import { doc, getDoc, getDocs, setDoc, deleteDoc, collection, query, where, orderBy, limit, startAfter, onSnapshot, updateDoc, getCountFromServer } from 'firebase/firestore';
 
 export type Unsubscribe = () => void;
 
@@ -111,25 +122,87 @@ export const saveFullOrderToServer = async (order: Omit<Order, 'id'> & { id?: st
 
 export const getServerOrders = async (): Promise<Order[]> => {
   try {
-    const ordersList = await getOrdersViaApi();
+    const session = StorageService.getAdminSession();
+    let q;
+    if (session && session.role === 'staff') {
+      q = query(
+        collection(db(), FIRESTORE_ORDERS_COLLECTION),
+        where('status', 'in', ['new', 'preparing', 'ready', 'out_for_delivery'])
+      );
+    } else {
+      q = query(
+        collection(db(), FIRESTORE_ORDERS_COLLECTION),
+        orderBy('receivedAt', 'desc'),
+        limit(500)
+      );
+    }
+
+    const snapshot = await getDocs(q);
+    let ordersList = snapshot.docs.map((docDoc) => docDoc.data() as Order);
+
+    if (session) {
+      if (session.role === 'staff') {
+        ordersList = ordersList.filter(o => !o.isDeleted && (session.outletId ? o.outletId === session.outletId : true));
+        ordersList.sort((a, b) => {
+          const timeA = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
+          const timeB = b.receivedAt ? new Date(b.receivedAt).getTime() : 0;
+          return timeB - timeA;
+        });
+
+        ordersList = ordersList.map(o => {
+          const sanitized = { ...o };
+          delete sanitized.total;
+          delete sanitized.deliveryFee;
+          delete sanitized.walletAmountRedeemed;
+          delete sanitized.rewardPointsRedeemed;
+          if (Array.isArray(sanitized.items)) {
+            sanitized.items = sanitized.items.map((it: any) => {
+              const cleanIt = { ...it };
+              delete cleanIt.price;
+              delete cleanIt.totalPrice;
+              return cleanIt;
+            });
+          }
+          return sanitized;
+        });
+      } else if (session.role === 'manager') {
+        ordersList = ordersList.filter(o => !o.isDeleted);
+      }
+    }
+
     StorageService.saveAdminOrders(ordersList);
     return ordersList;
   } catch (error) {
-    console.warn('API get orders failed, using cached orders:', error);
+    console.warn('Direct Firestore get orders failed, using cached orders:', error);
     return sortOrders(StorageService.getAdminOrders());
   }
 };
 
 export const getServerOrderById = async (orderId: string): Promise<Order | null> => {
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return StorageService.getAdminOrders().find(o => o.id === orderId) || null;
-    const response = await fetch(`${apiBase}/orders/${encodeURIComponent(orderId)}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.order || null;
+    const snap = await getDoc(doc(db(), FIRESTORE_ORDERS_COLLECTION, orderId));
+    if (!snap.exists()) return null;
+    const order = snap.data() as Order;
+    if (order.isDeleted) return null;
+
+    const session = StorageService.getAdminSession();
+    if (session && session.role === 'staff') {
+      delete order.total;
+      delete order.deliveryFee;
+      delete order.walletAmountRedeemed;
+      delete order.rewardPointsRedeemed;
+      if (Array.isArray(order.items)) {
+        order.items = order.items.map((it: any) => {
+          const cleanIt = { ...it };
+          delete cleanIt.price;
+          delete cleanIt.totalPrice;
+          return cleanIt;
+        });
+      }
+    }
+    return order;
   } catch (error) {
-    console.warn('API get order by id failed, using cached orders:', error);
+    console.warn('Direct Firestore get order by id failed, using cached orders:', error);
     return StorageService.getAdminOrders().find(o => o.id === orderId) || null;
   }
 };
@@ -153,7 +226,12 @@ export const saveCustomerToServer = async (profile: CustomerProfile): Promise<vo
   const localCusts = StorageService.getAdminCustomers().filter((c) => c.id !== profile.id);
   StorageService.saveAdminCustomers([profile, ...localCusts]);
 
-  await saveCustomerViaApi(profile);
+  try {
+    await setDoc(doc(db(), FIRESTORE_CUSTOMERS_COLLECTION, profile.id), profile, { merge: true });
+  } catch (error) {
+    console.warn('Direct Firestore save customer failed:', error);
+    throw error;
+  }
 };
 
 export const deleteCustomerFromServer = async (customerId: string): Promise<void> => {
@@ -161,17 +239,9 @@ export const deleteCustomerFromServer = async (customerId: string): Promise<void
   StorageService.saveAdminCustomers(localCusts);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/customers?customerId=${encodeURIComponent(customerId)}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.message || `Customer delete failed with status ${response.status}.`);
-    }
+    await deleteDoc(doc(db(), FIRESTORE_CUSTOMERS_COLLECTION, customerId));
   } catch (error) {
-    console.warn('API delete customer failed:', error);
+    console.warn('Direct Firestore delete customer failed:', error);
     throw error;
   }
 };
@@ -186,29 +256,25 @@ const sortCustomers = (customers: CustomerProfile[]): CustomerProfile[] => {
 
 export const getServerCustomers = async (): Promise<CustomerProfile[]> => {
   try {
-    if (!getApiBase()) return sortCustomers(StorageService.getAdminCustomers());
-    const response = await fetch(`${getApiBase()}/customers`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Customer fetch failed with status ${response.status}.`);
-    const data = (await response.json()) as { customers?: CustomerProfile[] };
-    const sorted = sortCustomers(data.customers ?? []);
+    const snapshot = await getDocs(
+      query(collection(db(), FIRESTORE_CUSTOMERS_COLLECTION), orderBy('createdAt', 'desc'), limit(500))
+    );
+    const sorted = sortCustomers(snapshot.docs.map((docDoc) => docDoc.data() as CustomerProfile));
     StorageService.saveAdminCustomers(sorted);
     return sorted;
   } catch (error) {
-    console.warn('API get customers failed, using cache:', error);
+    console.warn('Direct Firestore get customers failed, using cache:', error);
     return sortCustomers(StorageService.getAdminCustomers());
   }
 };
 
 export const getServerCustomerById = async (customerId: string): Promise<CustomerProfile | null> => {
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return StorageService.getAdminCustomers().find(c => c.id === customerId) || null;
-    const response = await fetch(`${apiBase}/customers?customerId=${encodeURIComponent(customerId)}`, { cache: 'no-store' });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { customer?: CustomerProfile };
-    return data.customer ?? null;
+    const snap = await getDoc(doc(db(), FIRESTORE_CUSTOMERS_COLLECTION, customerId));
+    if (!snap.exists()) return null;
+    return snap.data() as CustomerProfile;
   } catch (error) {
-    console.warn('API get customer by id failed:', error);
+    console.warn('Direct Firestore get customer by id failed:', error);
     return StorageService.getAdminCustomers().find(c => c.id === customerId) || null;
   }
 };
@@ -355,45 +421,79 @@ export const mergeCustomersOnServer = async (primaryId: string, secondaryId: str
   return await response.json();
 };
 
-// Polling-based Subscriptions for Offline/SSD Local Server Mode
 export const subscribeServerOrders = (
   onOrders: (orders: Order[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe => {
-  let intervalId: any = null;
-  const fetchAndCallback = async () => {
-    try {
-      const orders = await getServerOrders();
-      onOrders(orders);
-    } catch (e) {
-      onError(e as Error);
+  const session = StorageService.getAdminSession();
+  let q;
+  if (session && session.role === 'staff') {
+    q = query(
+      collection(db(), FIRESTORE_ORDERS_COLLECTION),
+      where('status', 'in', ['new', 'preparing', 'ready', 'out_for_delivery'])
+    );
+  } else {
+    q = query(
+      collection(db(), FIRESTORE_ORDERS_COLLECTION),
+      orderBy('receivedAt', 'desc'),
+      limit(500)
+    );
+  }
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      let ordersList = snapshot.docs.map((docDoc) => docDoc.data() as Order);
+      if (session) {
+        if (session.role === 'staff') {
+          ordersList = ordersList.filter(o => !o.isDeleted && (session.outletId ? o.outletId === session.outletId : true));
+          ordersList.sort((a, b) => {
+            const timeA = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
+            const timeB = b.receivedAt ? new Date(b.receivedAt).getTime() : 0;
+            return timeB - timeA;
+          });
+          ordersList = ordersList.map(o => {
+            const sanitized = { ...o };
+            delete sanitized.total;
+            delete sanitized.deliveryFee;
+            delete sanitized.walletAmountRedeemed;
+            delete sanitized.rewardPointsRedeemed;
+            if (Array.isArray(sanitized.items)) {
+              sanitized.items = sanitized.items.map((it: any) => {
+                const cleanIt = { ...it };
+                delete cleanIt.price;
+                delete cleanIt.totalPrice;
+                return cleanIt;
+              });
+            }
+            return sanitized;
+          });
+        } else if (session.role === 'manager') {
+          ordersList = ordersList.filter(o => !o.isDeleted);
+        }
+      }
+      onOrders(ordersList);
+    },
+    (error) => {
+      onError(error);
     }
-  };
-  fetchAndCallback();
-  intervalId = setInterval(fetchAndCallback, 3000);
-  return () => {
-    if (intervalId) clearInterval(intervalId);
-  };
+  );
 };
 
 export const subscribeServerCustomers = (
   onCustomers: (customers: CustomerProfile[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe => {
-  let intervalId: any = null;
-  const fetchAndCallback = async () => {
-    try {
-      const customers = await getServerCustomers();
+  return onSnapshot(
+    query(collection(db(), FIRESTORE_CUSTOMERS_COLLECTION), orderBy('createdAt', 'desc'), limit(500)),
+    (snapshot) => {
+      const customers = snapshot.docs.map((docDoc) => docDoc.data() as CustomerProfile);
       onCustomers(customers);
-    } catch (e) {
-      onError(e as Error);
+    },
+    (error) => {
+      onError(error);
     }
-  };
-  fetchAndCallback();
-  intervalId = setInterval(fetchAndCallback, 5000);
-  return () => {
-    if (intervalId) clearInterval(intervalId);
-  };
+  );
 };
 
 export const subscribeServerOrder = (
@@ -401,20 +501,39 @@ export const subscribeServerOrder = (
   onOrder: (order: Order | null) => void,
   onError: (error: Error) => void,
 ): Unsubscribe => {
-  let intervalId: any = null;
-  const fetchAndCallback = async () => {
-    try {
-      const order = await getServerOrderById(orderId);
+  const session = StorageService.getAdminSession();
+  return onSnapshot(
+    doc(db(), FIRESTORE_ORDERS_COLLECTION, orderId),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        onOrder(null);
+        return;
+      }
+      const order = snapshot.data() as Order;
+      if (order.isDeleted) {
+        onOrder(null);
+        return;
+      }
+      if (session && session.role === 'staff') {
+        delete order.total;
+        delete order.deliveryFee;
+        delete order.walletAmountRedeemed;
+        delete order.rewardPointsRedeemed;
+        if (Array.isArray(order.items)) {
+          order.items = order.items.map((it: any) => {
+            const cleanIt = { ...it };
+            delete cleanIt.price;
+            delete cleanIt.totalPrice;
+            return cleanIt;
+          });
+        }
+      }
       onOrder(order);
-    } catch (e) {
-      onError(e as Error);
+    },
+    (error) => {
+      onError(error);
     }
-  };
-  fetchAndCallback();
-  intervalId = setInterval(fetchAndCallback, 3000);
-  return () => {
-    if (intervalId) clearInterval(intervalId);
-  };
+  );
 };
 
 export const authenticateAdminViaApi = async (username: string, password: string): Promise<any> => {
@@ -441,19 +560,14 @@ export const authenticateAdminViaApi = async (username: string, password: string
   throw new Error('API is not configured. Admin authentication unavailable offline.');
 };
 
-// Dynamic Menu Items
 export const getServerMenuItems = async (): Promise<MenuItem[]> => {
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return StorageService.getAdminMenuItems();
-    const response = await fetch(`${apiBase}/menu-items`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Menu items fetch failed with status ${response.status}.`);
-    const data = (await response.json()) as { menuItems?: MenuItem[] };
-    const items = data.menuItems ?? [];
+    const snapshot = await getDocs(collection(db(), FIRESTORE_MENU_ITEMS_COLLECTION));
+    const items = snapshot.docs.map((docDoc) => docDoc.data() as MenuItem);
     StorageService.saveAdminMenuItems(items);
     return items;
   } catch (error) {
-    console.warn('API get menu items failed, using cache:', error);
+    console.warn('Direct Firestore get menu items failed, using cache:', error);
     return StorageService.getAdminMenuItems();
   }
 };
@@ -463,16 +577,10 @@ export const saveMenuItemToServer = async (item: MenuItem): Promise<void> => {
   StorageService.saveAdminMenuItems([item, ...localItems]);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/menu-items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(item),
-    });
-    if (!response.ok) throw new Error(`Menu item save failed with status ${response.status}.`);
+    await setDoc(doc(db(), FIRESTORE_MENU_ITEMS_COLLECTION, item.id), item, { merge: true });
   } catch (error) {
-    console.warn('API save menu item failed:', error);
+    console.warn('Direct Firestore save menu item failed:', error);
+    throw error;
   }
 };
 
@@ -480,16 +588,13 @@ export const seedMenuItemsToServer = async (items: MenuItem[]): Promise<void> =>
   StorageService.saveAdminMenuItems(items);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/menu-items/seed`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(items),
-    });
-    if (!response.ok) throw new Error(`Menu items seed failed with status ${response.status}.`);
+    const promises = items.map(item =>
+      setDoc(doc(db(), FIRESTORE_MENU_ITEMS_COLLECTION, item.id), item, { merge: true })
+    );
+    await Promise.all(promises);
   } catch (error) {
-    console.warn('API seed menu items failed:', error);
+    console.warn('Direct Firestore seed menu items failed:', error);
+    throw error;
   }
 };
 
@@ -497,35 +602,26 @@ export const subscribeServerMenuItems = (
   onItems: (items: MenuItem[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe => {
-  let intervalId: any = null;
-  const fetchAndCallback = async () => {
-    try {
-      const items = await getServerMenuItems();
+  return onSnapshot(
+    collection(db(), FIRESTORE_MENU_ITEMS_COLLECTION),
+    (snapshot) => {
+      const items = snapshot.docs.map((docDoc) => docDoc.data() as MenuItem);
       onItems(items);
-    } catch (e) {
-      onError(e as Error);
+    },
+    (error) => {
+      onError(error);
     }
-  };
-  fetchAndCallback();
-  intervalId = setInterval(fetchAndCallback, 10000);
-  return () => {
-    if (intervalId) clearInterval(intervalId);
-  };
+  );
 };
 
-// Dynamic Outlets
 export const getServerOutlets = async (): Promise<OutletConfig[]> => {
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return StorageService.getAdminOutlets();
-    const response = await fetch(`${apiBase}/outlets`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Outlets fetch failed with status ${response.status}.`);
-    const data = (await response.json()) as { outlets?: OutletConfig[] };
-    const list = data.outlets ?? [];
+    const snapshot = await getDocs(collection(db(), FIRESTORE_OUTLETS_COLLECTION));
+    const list = snapshot.docs.map((docDoc) => docDoc.data() as OutletConfig);
     StorageService.saveAdminOutlets(list);
     return list;
   } catch (error) {
-    console.warn('API get outlets failed, using cache:', error);
+    console.warn('Direct Firestore get outlets failed, using cache:', error);
     return StorageService.getAdminOutlets();
   }
 };
@@ -535,16 +631,10 @@ export const saveOutletToServer = async (outlet: OutletConfig): Promise<void> =>
   StorageService.saveAdminOutlets([outlet, ...localList]);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/outlets`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(outlet),
-    });
-    if (!response.ok) throw new Error(`Outlet save failed with status ${response.status}.`);
+    await setDoc(doc(db(), FIRESTORE_OUTLETS_COLLECTION, outlet.id), outlet, { merge: true });
   } catch (error) {
-    console.warn('API save outlet failed:', error);
+    console.warn('Direct Firestore save outlet failed:', error);
+    throw error;
   }
 };
 
@@ -553,17 +643,9 @@ export const deleteOutletFromServer = async (outletId: string): Promise<void> =>
   StorageService.saveAdminOutlets(localList);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/outlets?outletId=${encodeURIComponent(outletId)}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.message || `Outlet delete failed with status ${response.status}.`);
-    }
+    await deleteDoc(doc(db(), FIRESTORE_OUTLETS_COLLECTION, outletId));
   } catch (error) {
-    console.warn('API delete outlet failed:', error);
+    console.warn('Direct Firestore delete outlet failed:', error);
     throw error;
   }
 };
@@ -572,16 +654,13 @@ export const seedOutletsToServer = async (outlets: OutletConfig[]): Promise<void
   StorageService.saveAdminOutlets(outlets);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/outlets/seed`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(outlets),
-    });
-    if (!response.ok) throw new Error(`Outlets seed failed with status ${response.status}.`);
+    const promises = outlets.map(outlet =>
+      setDoc(doc(db(), FIRESTORE_OUTLETS_COLLECTION, outlet.id), outlet, { merge: true })
+    );
+    await Promise.all(promises);
   } catch (error) {
-    console.warn('API seed outlets failed:', error);
+    console.warn('Direct Firestore seed outlets failed:', error);
+    throw error;
   }
 };
 
@@ -589,35 +668,26 @@ export const subscribeServerOutlets = (
   onOutlets: (outlets: OutletConfig[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe => {
-  let intervalId: any = null;
-  const fetchAndCallback = async () => {
-    try {
-      const outlets = await getServerOutlets();
+  return onSnapshot(
+    collection(db(), FIRESTORE_OUTLETS_COLLECTION),
+    (snapshot) => {
+      const outlets = snapshot.docs.map((docDoc) => docDoc.data() as OutletConfig);
       onOutlets(outlets);
-    } catch (e) {
-      onError(e as Error);
+    },
+    (error) => {
+      onError(error);
     }
-  };
-  fetchAndCallback();
-  intervalId = setInterval(fetchAndCallback, 10000);
-  return () => {
-    if (intervalId) clearInterval(intervalId);
-  };
+  );
 };
 
-// Dynamic Offers
 export const getServerOffers = async (): Promise<OfferCard[]> => {
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return StorageService.getAdminOffers();
-    const response = await fetch(`${apiBase}/offers`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Offers fetch failed with status ${response.status}.`);
-    const data = (await response.json()) as { offers?: OfferCard[] };
-    const list = data.offers ?? [];
+    const snapshot = await getDocs(collection(db(), FIRESTORE_OFFERS_COLLECTION));
+    const list = snapshot.docs.map((docDoc) => docDoc.data() as OfferCard);
     StorageService.saveAdminOffers(list);
     return list;
   } catch (error) {
-    console.warn('API get offers failed, using cache:', error);
+    console.warn('Direct Firestore get offers failed, using cache:', error);
     return StorageService.getAdminOffers();
   }
 };
@@ -627,16 +697,10 @@ export const saveOfferToServer = async (offer: OfferCard): Promise<void> => {
   StorageService.saveAdminOffers([offer, ...localList]);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/offers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(offer),
-    });
-    if (!response.ok) throw new Error(`Offer save failed with status ${response.status}.`);
+    await setDoc(doc(db(), FIRESTORE_OFFERS_COLLECTION, offer.id), offer, { merge: true });
   } catch (error) {
-    console.warn('API save offer failed:', error);
+    console.warn('Direct Firestore save offer failed:', error);
+    throw error;
   }
 };
 
@@ -644,16 +708,13 @@ export const seedOffersToServer = async (offers: OfferCard[]): Promise<void> => 
   StorageService.saveAdminOffers(offers);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/offers/seed`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(offers),
-    });
-    if (!response.ok) throw new Error(`Offers seed failed with status ${response.status}.`);
+    const promises = offers.map(offer =>
+      setDoc(doc(db(), FIRESTORE_OFFERS_COLLECTION, offer.id), offer, { merge: true })
+    );
+    await Promise.all(promises);
   } catch (error) {
-    console.warn('API seed offers failed:', error);
+    console.warn('Direct Firestore seed offers failed:', error);
+    throw error;
   }
 };
 
@@ -661,20 +722,16 @@ export const subscribeServerOffers = (
   onOffers: (offers: OfferCard[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe => {
-  let intervalId: any = null;
-  const fetchAndCallback = async () => {
-    try {
-      const offers = await getServerOffers();
+  return onSnapshot(
+    collection(db(), FIRESTORE_OFFERS_COLLECTION),
+    (snapshot) => {
+      const offers = snapshot.docs.map((docDoc) => docDoc.data() as OfferCard);
       onOffers(offers);
-    } catch (e) {
-      onError(e as Error);
+    },
+    (error) => {
+      onError(error);
     }
-  };
-  fetchAndCallback();
-  intervalId = setInterval(fetchAndCallback, 10000);
-  return () => {
-    if (intervalId) clearInterval(intervalId);
-  };
+  );
 };
 
 export const changeStaffPassword = async (
@@ -696,19 +753,14 @@ export const changeStaffPassword = async (
 
 export const getServerWalletTransactions = async (): Promise<WalletTransaction[]> => {
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return StorageService.getAdminTransactions();
-    const response = await fetch(`${apiBase}/wallet/transactions`, {
-      headers: getAuthHeaders(),
-      cache: 'no-store'
-    });
-    if (!response.ok) throw new Error(`Transactions fetch failed with status ${response.status}.`);
-    const data = (await response.json()) as { transactions?: WalletTransaction[] };
-    const list = data.transactions ?? [];
+    const snapshot = await getDocs(
+      query(collection(db(), FIRESTORE_WALLET_TRANSACTIONS_COLLECTION), orderBy('createdAt', 'desc'), limit(500))
+    );
+    const list = snapshot.docs.map((docDoc) => docDoc.data() as WalletTransaction);
     StorageService.saveAdminTransactions(list);
     return list;
   } catch (error) {
-    console.warn('API get transactions failed, using cache:', error);
+    console.warn('Direct Firestore get transactions failed, using cache:', error);
     return StorageService.getAdminTransactions();
   }
 };
@@ -718,16 +770,9 @@ export const saveWalletTransactionToServer = async (transaction: WalletTransacti
   StorageService.saveAdminTransactions([transaction, ...localList]);
 
   try {
-    const apiBase = getApiBase();
-    if (!apiBase) return;
-    const response = await fetch(`${apiBase}/wallet/transactions`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(transaction),
-    });
-    if (!response.ok) throw new Error(`Transaction save failed with status ${response.status}.`);
+    await setDoc(doc(db(), FIRESTORE_WALLET_TRANSACTIONS_COLLECTION, transaction.id), transaction, { merge: true });
   } catch (error) {
-    console.warn('API save transaction failed:', error);
+    console.warn('Direct Firestore save transaction failed:', error);
   }
 };
 
@@ -735,70 +780,52 @@ export const subscribeServerWalletTransactions = (
   onTransactions: (transactions: WalletTransaction[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe => {
-  let intervalId: any = null;
-  const fetchAndCallback = async () => {
-    try {
-      const txs = await getServerWalletTransactions();
+  return onSnapshot(
+    query(collection(db(), FIRESTORE_WALLET_TRANSACTIONS_COLLECTION), orderBy('createdAt', 'desc'), limit(500)),
+    (snapshot) => {
+      const txs = snapshot.docs.map((docDoc) => docDoc.data() as WalletTransaction);
       onTransactions(txs);
-    } catch (e) {
-      onError(e as Error);
+    },
+    (error) => {
+      onError(error);
     }
-  };
-  fetchAndCallback();
-  intervalId = setInterval(fetchAndCallback, 5000);
-  return () => {
-    if (intervalId) clearInterval(intervalId);
-  };
+  );
 };
 
 export const getServerSettings = async (): Promise<AppSettings> => {
-  const apiBase = getApiBase();
-  if (!apiBase) return {};
-  const response = await fetch(`${apiBase}/settings`);
-  if (!response.ok) throw new Error('Failed to load settings.');
-  const data = await response.json();
-  return data.settings || {};
+  try {
+    const snap = await getDoc(doc(db(), 'settings', 'app'));
+    if (!snap.exists()) return {};
+    return snap.data() as AppSettings;
+  } catch (error) {
+    console.warn('Direct Firestore get settings failed:', error);
+    return {};
+  }
 };
 
 export const saveSettingsToServer = async (settings: AppSettings): Promise<void> => {
-  const apiBase = getApiBase();
-  if (!apiBase) return;
-  const response = await fetch(`${apiBase}/settings`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(settings),
-  });
-  if (!response.ok) throw new Error('Failed to save settings.');
+  try {
+    await setDoc(doc(db(), 'settings', 'app'), settings, { merge: true });
+  } catch (error) {
+    console.warn('Direct Firestore save settings failed:', error);
+    throw error;
+  }
 };
 
 export const getFirestoreUsage = async (): Promise<any[]> => {
-  const apiBase = getApiBase();
-  if (!apiBase) return [];
-  const response = await fetch(`${apiBase}/customers?action=usage`, {
-    headers: getAuthHeaders(),
-    cache: 'no-store'
-  });
-  if (!response.ok) throw new Error('Failed to load usage stats.');
-  const data = await response.json();
-  return data.usage || [];
+  try {
+    const snapshot = await getDocs(collection(db(), 'firestore_usage'));
+    const usageData = snapshot.docs.map(docDoc => ({
+      date: docDoc.id,
+      ...docDoc.data()
+    }));
+    usageData.sort((a, b) => b.date.localeCompare(a.date));
+    return usageData;
+  } catch (error) {
+    console.warn('Direct Firestore get usage failed:', error);
+    return [];
+  }
 };
-
-export interface BackupDetail {
-  filename: string;
-  size: string;
-  createdAt: string;
-  location: string;
-  status: string;
-}
-
-export interface BackupStatusResponse {
-  success: boolean;
-  backups: BackupDetail[];
-  lastBackupTime: string;
-  lastBackupSize: string;
-  lastBackupStatus: string;
-  lastBackupLocation: string;
-}
 
 export const getBackupStatus = async (): Promise<BackupStatusResponse> => {
   const apiBase = getApiBase();
@@ -840,27 +867,30 @@ export const triggerDatabaseRestore = async (filename: string): Promise<any> => 
   return await response.json();
 };
 
-export interface NotificationStats {
-  date: string;
-  sent: number;
-  failed: number;
-  removedTokens?: number;
-  updatedAt?: string;
-}
-
-export interface NotificationDashboardData {
-  success: boolean;
-  totalDevices: number;
-  stats: NotificationStats[];
-}
-
 export const getNotificationDashboardData = async (): Promise<NotificationDashboardData> => {
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('API is not configured.');
-  const response = await fetch(`${apiBase}/notifications/dashboard`, {
-    headers: getAuthHeaders(),
-    cache: 'no-store'
-  });
-  if (!response.ok) throw new Error('Failed to load notification stats.');
-  return (await response.json()) as NotificationDashboardData;
+  try {
+    const tokensColl = collection(db(), FIRESTORE_NOTIFICATION_TOKENS_COLLECTION);
+    const countSnapshot = await getCountFromServer(tokensColl);
+    const totalDevices = countSnapshot.data().count;
+
+    const statsColl = collection(db(), 'notification_stats');
+    const statsQuery = query(statsColl, orderBy('updatedAt', 'desc'), limit(30));
+    const statsSnapshot = await getDocs(statsQuery);
+    const stats = statsSnapshot.docs.map(docDoc => ({
+      date: docDoc.id,
+      sent: docDoc.data().sent || 0,
+      failed: docDoc.data().failed || 0,
+      removedTokens: docDoc.data().removedTokens || 0,
+      updatedAt: docDoc.data().updatedAt || ''
+    }));
+
+    return {
+      success: true,
+      totalDevices,
+      stats
+    };
+  } catch (error) {
+    console.warn('Direct Firestore get notification dashboard failed:', error);
+    throw error;
+  }
 };
