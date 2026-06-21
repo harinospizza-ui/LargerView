@@ -235,24 +235,9 @@ const App: React.FC = () => {
   const [offers, setOffers] = useState<OfferCard[]>(OFFER_CARDS);
   const [configLoaded, setConfigLoaded] = useState(false);
 
-  // Fetch dynamic client Firebase config from serverless backend on startup
+  // Initialize config immediately using Vite variables
   useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const response = await fetch('/api/firebase-config');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.config && data.config.apiKey) {
-            setDynamicFirebaseConfig(data.config);
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to fetch Firebase config:', err);
-      } finally {
-        setConfigLoaded(true);
-      }
-    };
-    fetchConfig();
+    setConfigLoaded(true);
   }, []);
 
   // Fetch application settings and static data (menu, outlets, offers) on startup with caching
@@ -261,6 +246,22 @@ const App: React.FC = () => {
 
     const loadData = async () => {
       try {
+        // Failsafe DB Recovery & Initialization
+        try {
+          const { initializeFirebaseCollections } = await import('./services/orderApi');
+          await initializeFirebaseCollections();
+        } catch (dbErr) {
+          console.warn('Failsafe collection initialization error (non-fatal):', dbErr);
+        }
+
+        // Failsafe Menu Recovery & Verification
+        try {
+          const { recoverMenuItems } = await import('./services/orderApi');
+          await recoverMenuItems(MENU_ITEMS);
+        } catch (menuErr) {
+          console.warn('Failsafe menu items recovery error (non-fatal):', menuErr);
+        }
+
         // Fetch settings once to get instagramUrl and current menuVersion
         const settings = await getServerSettings();
         if (settings.instagramUrl) {
@@ -318,7 +319,7 @@ const App: React.FC = () => {
           setOffers(finalOffers);
         }
 
-        // Cache they locally
+        // Cache them locally
         localStorage.setItem('cached_menu_items', JSON.stringify(finalMenuItems));
         localStorage.setItem('cached_outlets', JSON.stringify(finalOutlets));
         localStorage.setItem('cached_offers', JSON.stringify(finalOffers));
