@@ -7,7 +7,6 @@ import {
   getServerCustomers, 
   deleteCustomerFromServer,
   blockCustomerOnServer,
-  sendOtpToCustomer,
   bulkRemoveCustomersFromServer,
   mergeCustomersOnServer
 } from '../services/orderApi';
@@ -386,51 +385,16 @@ export const AdminWallets: React.FC<AdminWalletsProps> = ({
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {!verified && (
-                    <>
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`Are you sure you want to send a WhatsApp verification OTP to ${customer.name}?`)) {
-                            return;
-                          }
-                          try {
-                            const res = await sendOtpToCustomer(customer.id);
-                            setOtpStatuses(prev => ({
-                              ...prev,
-                              [customer.id]: {
-                                success: res.success,
-                                message: res.message || 'OTP sent successfully.',
-                                timestamp: res.timestamp || new Date().toISOString()
-                              }
-                            }));
-                            alert(res.message || 'OTP sent successfully.');
-                            onRefresh();
-                          } catch (err: any) {
-                            setOtpStatuses(prev => ({
-                              ...prev,
-                              [customer.id]: {
-                                success: false,
-                                message: err.message || 'Failed to send OTP.',
-                                timestamp: new Date().toISOString()
-                              }
-                            }));
-                            alert(err.message || 'Failed to send OTP.');
-                          }
-                        }}
-                        className="rounded-xl bg-green-700 hover:bg-green-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-premium active:scale-95 cursor-pointer animate-fade-in"
-                      >
-                        Send OTP
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm("Are you sure you want to verify this customer manually?")) {
-                            onVerifyCustomer(customer);
-                          }
-                        }}
-                        className="rounded-xl bg-red-650 hover:bg-red-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-premium active:scale-95 cursor-pointer animate-fade-in"
-                      >
-                        Verify Manually
-                      </button>
-                    </>
+                    <button
+                      onClick={() => {
+                        if (confirm("Are you sure you want to verify this customer manually?")) {
+                          onVerifyCustomer(customer);
+                        }
+                      }}
+                      className="rounded-xl bg-red-650 hover:bg-red-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-premium active:scale-95 cursor-pointer animate-fade-in"
+                    >
+                      Verify
+                    </button>
                   )}
                   {session.role === 'admin' && (
                     <>

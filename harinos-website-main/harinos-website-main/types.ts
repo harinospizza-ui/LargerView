@@ -195,4 +195,16 @@ export interface AppSettings {
   menuVersion?: string;
 }
 
+export interface VerificationRequest {
+  requestId: string;
+  customerName: string;
+  mobileNumber: string;
+  otp: string;
+  status: 'pending' | 'verified';
+  createdAt: string;
+  verifiedAt: string | null;
+  verifiedBy: string | null;
+}
+
+
 

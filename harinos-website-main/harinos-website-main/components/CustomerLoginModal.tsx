@@ -1,6 +1,14 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CustomerProfile } from '../types';
 import { initCustomerLogin, verifyCustomerLogin } from '../services/orderApi';
+
+const checkBusinessHours = (): boolean => {
+  const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const ist = new Date(utc + (3600000 * 5.5)); // IST is UTC+5.5
+  const hours = ist.getHours();
+  return hours >= 11 && hours < 21;
+};
 
 interface CustomerLoginModalProps {
   onSave: (profile: CustomerProfile) => void;
@@ -15,8 +23,15 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [requestId, setRequestId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!checkBusinessHours()) {
+      setError("Harino's online ordering is available between 11:00 AM and 9:00 PM.");
+    }
+  }, []);
   
   const logoHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -37,6 +52,12 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
 
   const handleSendOtp = async () => {
     setError('');
+    
+    if (!checkBusinessHours()) {
+      setError("Harino's online ordering is available between 11:00 AM and 9:00 PM.");
+      return;
+    }
+
     const cleanPhone = phone.replace(/\D/g, '');
     
     if (mode === 'register' && !name.trim()) {
@@ -54,14 +75,11 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
       const result = await initCustomerLogin(phone, isRegister ? name.trim() : undefined, isRegister);
       
       if (result.success) {
-        if (isRegister && result.exists) {
-          alert('An account already exists with this phone number. Routing you to Login.');
-          setMode('otp');
-        } else {
-          setMode('otp');
+        setMode('otp');
+        if (result.requestId) {
+          setRequestId(result.requestId);
         }
-        
-        if (result.customerId) setCustomerId(result.customerId);
+        alert(result.message || 'Verification request submitted. Please wait while we verify your number.');
       } else {
         setError(result.message || 'Failed to send OTP. Please try again.');
       }
@@ -74,6 +92,12 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
 
   const handleVerifyOtp = async () => {
     setError('');
+
+    if (!checkBusinessHours()) {
+      setError("Harino's online ordering is available between 11:00 AM and 9:00 PM.");
+      return;
+    }
+
     if (otp.trim().length !== 6) {
       setError('Please enter the 6-digit OTP code.');
       return;
@@ -81,7 +105,7 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
 
     setLoading(true);
     try {
-      const result = await verifyCustomerLogin(customerId, otp.trim());
+      const result = await verifyCustomerLogin(requestId, otp.trim());
       if (result.success && result.customer) {
         onSave(result.customer);
       } else {
@@ -123,7 +147,7 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
           {mode === 'select' && "Enjoy fresh, hot, custom-made pizzas delivered right to your door. Choose an option to get started."}
           {mode === 'register' && "Enter your details to create an account and access your pizza wallet."}
           {mode === 'login' && "Enter your registered mobile number to log into your account."}
-          {mode === 'otp' && `Enter the 6-digit OTP code generated for your mobile number.`}
+          {mode === 'otp' && "Verification request submitted. Please wait while we verify your number. Once you receive your OTP via WhatsApp, enter it below."}
         </p>
 
         {error && (
@@ -178,10 +202,10 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
             
             <button
               onClick={handleSendOtp}
-              disabled={loading}
+              disabled={loading || !checkBusinessHours()}
               className="w-full rounded-2xl bg-red-650 bg-red-600 hover:bg-red-500 text-white py-4 text-[11px] font-black uppercase tracking-widest transition-premium active:scale-95 shadow-lg shadow-red-200 disabled:opacity-50"
             >
-              {loading ? "Sending..." : "Send Verification Code"}
+              {loading ? "Submitting..." : "Request Verification"}
             </button>
 
             <div className="text-center mt-4">
@@ -213,10 +237,10 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
             
             <button
               onClick={handleSendOtp}
-              disabled={loading}
+              disabled={loading || !checkBusinessHours()}
               className="w-full rounded-2xl bg-red-655 bg-red-600 hover:bg-red-500 text-white py-4 text-[11px] font-black uppercase tracking-widest transition-premium active:scale-95 shadow-lg shadow-red-200 disabled:opacity-50"
             >
-              {loading ? "Sending..." : "Send Verification Code"}
+              {loading ? "Submitting..." : "Request Verification"}
             </button>
 
             <div className="text-center mt-4">
@@ -249,7 +273,7 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
             
             <button
               onClick={handleVerifyOtp}
-              disabled={loading}
+              disabled={loading || !checkBusinessHours()}
               className="w-full rounded-2xl bg-red-650 bg-red-600 hover:bg-red-500 text-white py-4 text-[11px] font-black uppercase tracking-widest transition-premium active:scale-95 shadow-lg shadow-red-200 disabled:opacity-50"
             >
               {loading ? "Verifying..." : "Verify & Continue"}

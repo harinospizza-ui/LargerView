@@ -34,6 +34,7 @@ import { AdminDashboard } from './AdminDashboard';
 import { AdminUsage } from './AdminUsage';
 import { AdminBackup } from './AdminBackup';
 import { AdminNotifications } from './AdminNotifications';
+import { AdminVerificationRequests } from './AdminVerificationRequests';
 
 interface AdminPanelProps {
   session: AdminSession | null;
@@ -124,7 +125,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<CustomerProfile[]>([]);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'orders' | 'wallets' | 'menu' | 'outlets' | 'offers' | 'dashboard' | 'settings' | 'usage' | 'backup' | 'notifications'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'wallets' | 'menu' | 'outlets' | 'offers' | 'dashboard' | 'settings' | 'usage' | 'backup' | 'notifications' | 'verificationRequests'>('orders');
   const [instagramUrlInput, setInstagramUrlInput] = useState('');
 
 
@@ -390,6 +391,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
           </button>
         )}
         {session.role !== 'staff' && (
+          <button onClick={() => setActiveTab('verificationRequests')} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium ${activeTab === 'verificationRequests' ? 'bg-gradient-premium border-red-500/30 text-white' : 'bg-white/[0.03] border-white/5 text-slate-400'}`}>
+            Verification Requests
+          </button>
+        )}
+        {session.role !== 'staff' && (
           <>
             <button onClick={() => setActiveTab('menu')} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium ${activeTab === 'menu' ? 'bg-gradient-premium border-red-500/30 text-white' : 'bg-white/[0.03] border-white/5 text-slate-400'}`}>
               Menu
@@ -439,6 +445,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
             onRefresh={refresh}
             onVerifyCustomer={verifyCustomer}
           />
+        )}
+        {activeTab === 'verificationRequests' && session.role !== 'staff' && (
+          <AdminVerificationRequests session={session} />
         )}
         {(activeTab === 'menu' || activeTab === 'outlets' || activeTab === 'offers') && session.role !== 'staff' && (
           <AdminMenu

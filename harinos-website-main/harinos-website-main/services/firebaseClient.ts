@@ -25,6 +25,8 @@ export const FIRESTORE_OUTLETS_COLLECTION = 'outlets';
 export const FIRESTORE_OFFERS_COLLECTION = 'offers';
 export const FIRESTORE_STAFF_USERS_COLLECTION = 'users';
 export const FIRESTORE_WALLET_TRANSACTIONS_COLLECTION = 'wallet_transactions';
+export const FIRESTORE_VERIFICATION_REQUESTS_COLLECTION = 'customerVerificationRequests';
+
 
 export const isFirebaseClientConfigured = (): boolean => {
   const cfg = dynamicFirebaseConfig || firebaseConfig;

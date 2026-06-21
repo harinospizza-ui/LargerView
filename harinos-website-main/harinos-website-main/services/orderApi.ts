@@ -1,4 +1,4 @@
-import { CustomerProfile, Order, OrderStatus, MenuItem, OutletConfig, OfferCard, WalletTransaction, AppSettings } from '../types';
+import { CustomerProfile, Order, OrderStatus, MenuItem, OutletConfig, OfferCard, WalletTransaction, AppSettings, VerificationRequest } from '../types';
 import { StorageService } from './storage';
 import {
   db,
@@ -8,7 +8,8 @@ import {
   FIRESTORE_OUTLETS_COLLECTION,
   FIRESTORE_OFFERS_COLLECTION,
   FIRESTORE_WALLET_TRANSACTIONS_COLLECTION,
-  FIRESTORE_NOTIFICATION_TOKENS_COLLECTION
+  FIRESTORE_NOTIFICATION_TOKENS_COLLECTION,
+  FIRESTORE_VERIFICATION_REQUESTS_COLLECTION
 } from './firebaseClient';
 import { doc, getDoc, getDocs, setDoc, deleteDoc, collection, query, where, orderBy, limit, startAfter, onSnapshot, updateDoc, getCountFromServer } from 'firebase/firestore';
 
@@ -283,7 +284,7 @@ export const initCustomerLogin = async (
   phone: string,
   name?: string,
   isRegistering?: boolean
-): Promise<{ success: boolean; exists: boolean; customerId?: string; otp?: string; message?: string }> => {
+): Promise<{ success: boolean; exists: boolean; requestId?: string; message?: string }> => {
   const apiBase = getApiBase();
   if (!apiBase) throw new Error('Central API is not configured.');
   
@@ -293,12 +294,17 @@ export const initCustomerLogin = async (
     body: JSON.stringify({ phone, name, isRegistering }),
   });
   
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.message || 'Verification request failed.');
+  }
+
   const data = await response.json();
   return data;
 };
 
 export const verifyCustomerLogin = async (
-  customerId: string,
+  requestId: string,
   otp: string
 ): Promise<{ success: boolean; customer?: CustomerProfile; message?: string }> => {
   const apiBase = getApiBase();
@@ -307,7 +313,7 @@ export const verifyCustomerLogin = async (
   const response = await fetch(`${apiBase}/customers?action=login-verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerId, otp }),
+    body: JSON.stringify({ requestId, otp }),
   });
   
   if (!response.ok) {
@@ -349,23 +355,7 @@ export const verifyServerCustomer = async (customerId: string, otp?: string): Pr
   return updated;
 };
 
-export const sendOtpToCustomer = async (customerId: string): Promise<any> => {
-  const apiBase = getApiBase();
-  if (!apiBase) throw new Error('Central API is not configured.');
 
-  const response = await fetch(`${apiBase}/customers?action=send-otp`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ customerId }),
-  });
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.message || `Failed to send OTP.`);
-  }
-
-  return await response.json();
-};
 
 export const blockCustomerOnServer = async (customerId: string, blocked: boolean): Promise<any> => {
   const apiBase = getApiBase();
@@ -489,6 +479,22 @@ export const subscribeServerCustomers = (
     (snapshot) => {
       const customers = snapshot.docs.map((docDoc) => docDoc.data() as CustomerProfile);
       onCustomers(customers);
+    },
+    (error) => {
+      onError(error);
+    }
+  );
+};
+
+export const subscribeServerVerificationRequests = (
+  onRequests: (requests: VerificationRequest[]) => void,
+  onError: (error: Error) => void,
+): Unsubscribe => {
+  return onSnapshot(
+    query(collection(db(), FIRESTORE_VERIFICATION_REQUESTS_COLLECTION), orderBy('createdAt', 'desc'), limit(500)),
+    (snapshot) => {
+      const requests = snapshot.docs.map((docDoc) => docDoc.data() as VerificationRequest);
+      onRequests(requests);
     },
     (error) => {
       onError(error);

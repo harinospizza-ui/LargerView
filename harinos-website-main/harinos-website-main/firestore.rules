@@ -18,6 +18,11 @@ service cloud.firestore {
       allow read, write, delete: if isAdminOrManager();
     }
 
+    // Verification Requests: Admin/Manager can read/write
+    match /customerVerificationRequests/{requestId} {
+      allow read, write, delete: if isAdminOrManager();
+    }
+
     // Wallet Transactions Rules: Admin/Manager can read/write
     match /wallet_transactions/{transactionId} {
       allow read, write, delete: if isAdminOrManager();

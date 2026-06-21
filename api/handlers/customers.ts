@@ -46,62 +46,13 @@ const sanitizeCustomer = (customer: any) => {
   return sanitized;
 };
 
-async function sendWhatsAppMessage(phone: string, text: string): Promise<{ success: boolean; message: string }> {
-  const apiUrl = process.env.WHATSAPP_API_URL || '';
-  const apiToken = process.env.WHATSAPP_API_TOKEN || '';
-
-  if (!apiUrl || !apiToken) {
-    return { success: false, message: 'WhatsApp Gateway credentials not configured.' };
-  }
-
-  let cleanPhone = phone.replace(/\D/g, '');
-  if (cleanPhone.length === 10) {
-    cleanPhone = '91' + cleanPhone;
-  }
-
-  try {
-    let response;
-    if (apiUrl.toLowerCase().includes('ultramsg')) {
-      let url = apiUrl;
-      if (!url.endsWith('/messages/chat')) {
-        url = url.replace(/\/$/, '') + '/messages/chat';
-      }
-      const params = new URLSearchParams();
-      params.append('token', apiToken);
-      params.append('to', cleanPhone);
-      params.append('body', text);
-
-      response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params,
-      });
-    } else {
-      response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiToken}`,
-        },
-        body: JSON.stringify({
-          to: cleanPhone,
-          body: text,
-        }),
-      });
-    }
-
-    if (response.ok) {
-      return { success: true, message: 'Sent successfully.' };
-    } else {
-      const errorText = await response.text();
-      return { success: false, message: `Gateway error ${response.status}: ${errorText.substring(0, 100)}` };
-    }
-  } catch (error: any) {
-    return { success: false, message: `Connection error: ${error.message}` };
-  }
-}
+const checkBusinessHours = (): boolean => {
+  const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const ist = new Date(utc + (3600000 * 5.5)); // IST is UTC + 5.5
+  const hours = ist.getHours();
+  return hours >= 11 && hours < 21;
+};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -135,19 +86,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const isStaff = caller && (caller.role === 'admin' || caller.role === 'manager');
 
       if (!isStaff) {
-        const { otp } = req.body as { otp?: string };
-        if (!otp) {
-          res.status(400).json({ success: false, message: 'OTP is required.' });
-          return;
-        }
-        if (customerData.otp !== otp) {
-          res.status(400).json({ success: false, message: 'Incorrect OTP. Please try again.' });
-          return;
-        }
-        if (!customerData.otpExpiry || customerData.otpExpiry < Date.now()) {
-          res.status(400).json({ success: false, message: 'OTP has expired. Please request a new one.' });
-          return;
-        }
+        res.status(403).json({ success: false, message: 'Forbidden. Admin or Manager role required.' });
+        return;
       }
 
       const cleanPhone = (p: string) => p.replace(/\D/g, '');
@@ -192,7 +132,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
 
       await docRef.set(customer, { merge: true });
-      await trackUsage({ reads: readsCount, writes: 1, customersReads: readsCount });
+
+      // Mark associated verification requests as verified
+      const reqSnap = await db.collection('customerVerificationRequests')
+        .where('mobileNumber', '==', customerData.phone)
+        .where('status', '==', 'pending')
+        .get();
+
+      const batch = db.batch();
+      reqSnap.docs.forEach(docDoc => {
+        batch.update(docDoc.ref, {
+          status: 'verified',
+          verifiedAt: new Date().toISOString(),
+          verifiedBy: caller.username || 'Admin_Harinos'
+        });
+      });
+      await batch.commit();
+
+      const totalWrites = 1 + reqSnap.size;
+      await trackUsage({ reads: readsCount + reqSnap.size, writes: totalWrites, customersReads: readsCount });
       
       const responseCustomer = { ...customer };
       delete responseCustomer.otp;
@@ -293,41 +251,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'POST') {
       const { action } = req.query as { action?: string };
 
-      if (action === 'send-otp') {
-        const caller = authenticateRequest(req);
-        if (!caller || (caller.role !== 'admin' && caller.role !== 'manager')) {
-          res.status(403).json({ success: false, message: 'Forbidden. Admin/Manager role required.' });
-          return;
-        }
-        const { customerId } = req.body as { customerId?: string };
-        if (!customerId) {
-          res.status(400).json({ success: false, message: 'Missing customerId.' });
-          return;
-        }
-        const docRef = db.collection('customers').doc(decodeURIComponent(customerId));
-        const snap = await docRef.get();
-        if (!snap.exists) {
-          res.status(404).json({ success: false, message: 'Customer not found.' });
-          return;
-        }
-        const customerData = snap.data() as any;
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiry = Date.now() + 10 * 60 * 1000;
-        
-        await docRef.set({ otp, otpExpiry }, { merge: true });
-        
-        const otpText = `Your Harino's Pizza verification code is: ${otp}. Valid for 10 minutes.`;
-        const waResult = await sendWhatsAppMessage(customerData.phone, otpText);
-        
-        if (!waResult.success) {
-          res.status(502).json({ success: false, message: waResult.message });
-          return;
-        }
-        
-        await trackUsage({ reads: 1, writes: 1, customersReads: 1 });
-        res.json({ success: true, message: 'OTP sent successfully.' });
-        return;
-      }
+
 
       if (action === 'block') {
         const caller = authenticateRequest(req);
@@ -481,6 +405,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (action === 'login-init') {
+        if (!checkBusinessHours()) {
+          res.status(403).json({
+            success: false,
+            message: "Harino's online ordering is available between 11:00 AM and 9:00 PM."
+          });
+          return;
+        }
+
         const { phone, name, isRegistering } = req.body as { phone: string; name?: string; isRegistering?: boolean };
         if (!phone) {
           res.status(400).json({ success: false, message: 'Phone number is required.' });
@@ -499,7 +431,81 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
 
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const requestId = `req_${Date.now()}`;
+
+        // Store verification request in Firestore
+        const requestDocRef = db.collection('customerVerificationRequests').doc(requestId);
+        await requestDocRef.set({
+          requestId,
+          customerName: name?.trim() || 'Customer',
+          mobileNumber: phone,
+          otp,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          verifiedAt: null,
+          verifiedBy: null
+        });
+
+        await trackUsage({ reads: 1, writes: 1 });
+
+        res.json({
+          success: true,
+          requestId,
+          message: 'Verification request submitted. Please wait while we verify your number.'
+        });
+        return;
+      }
+
+      if (action === 'login-verify') {
+        if (!checkBusinessHours()) {
+          res.status(403).json({
+            success: false,
+            message: "Harino's online ordering is available between 11:00 AM and 9:00 PM."
+          });
+          return;
+        }
+
+        const { requestId, otp } = req.body as { requestId: string; otp: string };
+        if (!requestId || !otp) {
+          res.status(400).json({ success: false, message: 'Request ID and OTP are required.' });
+          return;
+        }
+
+        const requestDocRef = db.collection('customerVerificationRequests').doc(requestId);
+        const requestSnap = await requestDocRef.get();
+        if (!requestSnap.exists) {
+          await trackUsage({ reads: 1 });
+          res.status(404).json({ success: false, message: 'Verification request not found.' });
+          return;
+        }
+
+        const verificationRequest = requestSnap.data() as any;
+        if (verificationRequest.status === 'verified') {
+          await trackUsage({ reads: 1 });
+          res.status(400).json({ success: false, message: 'Verification request already verified.' });
+          return;
+        }
+
+        if (verificationRequest.otp !== otp) {
+          await trackUsage({ reads: 1 });
+          res.status(400).json({ success: false, message: 'Incorrect OTP. Please try again.' });
+          return;
+        }
+
+        // OTP matches: mark request verified
+        await requestDocRef.update({
+          status: 'verified',
+          verifiedAt: new Date().toISOString(),
+          verifiedBy: 'customer'
+        });
+
         // Search for existing customer
+        const phone = verificationRequest.mobileNumber;
+        const cleanPhone = (p: string) => p.replace(/\D/g, '');
+        const targetPhone = cleanPhone(phone);
+
         let existingCustomer: any = null;
         let querySnap = await db.collection('customers').where('phone', '==', phone).get();
         let totalReads = 1 + (querySnap.size || 1);
@@ -523,61 +529,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiry = Date.now() + 10 * 60 * 1000;
+        const generateReferralCode = () => {
+          return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+        };
+
+        let responseCustomer: any = null;
 
         if (existingCustomer) {
           if (existingCustomer.status === 'blocked') {
-            await trackUsage({ reads: totalReads, customersReads: totalReads });
-            res.status(403).json({ success: false, message: 'This mobile number is permanently blocked.' });
+            await trackUsage({ reads: totalReads + 1, writes: 1 });
+            res.status(403).json({ success: false, message: 'This account is permanently blocked.' });
             return;
           }
 
-          await db.collection('customers').doc(existingCustomer.id).set({
-            otp,
-            otpExpiry
-          }, { merge: true });
+          const referralCode = existingCustomer.referralCode ?? generateReferralCode();
+          responseCustomer = {
+            ...existingCustomer,
+            verified: true,
+            referralCode,
+            otp: admin.firestore.FieldValue.delete(),
+            otpExpiry: admin.firestore.FieldValue.delete()
+          };
 
-          const otpText = `Your Harino's Pizza verification code is: ${otp}. Valid for 10 minutes.`;
-          const waResult = await sendWhatsAppMessage(phone, otpText);
-          
-          if (!waResult.success) {
-            await trackUsage({ reads: totalReads, customersReads: totalReads });
-            res.status(502).json({
-              success: false,
-              message: 'OTP service temporarily unavailable. Please try again later.'
-            });
-            return;
-          }
-
-          await trackUsage({ reads: totalReads, writes: 1, customersReads: totalReads });
-
-          res.json({
-            success: true,
-            exists: true,
-            customerId: existingCustomer.id,
-            message: 'OTP generated successfully.'
-          });
-          return;
+          await db.collection('customers').doc(existingCustomer.id).set(responseCustomer, { merge: true });
+          await trackUsage({ reads: totalReads + 1, writes: 2, customersReads: totalReads });
         } else {
-          if (!isRegistering) {
-            await trackUsage({ reads: totalReads, customersReads: totalReads });
-            res.json({
-              success: false,
-              exists: false,
-              message: 'Account does not exist. Please create an account.'
-            });
-            return;
-          }
-
           const newCustomerId = `cust_${Date.now()}`;
-          const newCustomer = {
+          const referralCode = generateReferralCode();
+          responseCustomer = {
             id: newCustomerId,
-            name: name?.trim() || 'New Customer',
+            name: verificationRequest.customerName,
             phone: phone,
             email: '',
             loginMethod: 'phone',
-            verified: false,
+            verified: true,
             createdAt: new Date().toISOString(),
             walletBalance: 0,
             rewardPoints: 0,
@@ -585,91 +570,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             referralAttemptsRemaining: 3,
             referralCodeUsed: false,
             referralLocked: false,
-            otp,
-            otpExpiry
+            referralCode
           };
 
-          const otpText = `Your Harino's Pizza verification code is: ${otp}. Valid for 10 minutes.`;
-          const waResult = await sendWhatsAppMessage(phone, otpText);
-          
-          if (!waResult.success) {
-            await trackUsage({ reads: totalReads, customersReads: totalReads });
-            res.status(502).json({
-              success: false,
-              message: 'OTP service temporarily unavailable. Please try again later.'
-            });
-            return;
-          }
-
-          await db.collection('customers').doc(newCustomerId).set(newCustomer);
-          await trackUsage({ reads: totalReads, writes: 1, customersReads: totalReads });
-
-          res.status(201).json({
-            success: true,
-            exists: false,
-            customerId: newCustomerId,
-            message: 'OTP generated for registration.'
-          });
-          return;
-        }
-      }
-
-      if (action === 'login-verify') {
-        const { customerId, otp } = req.body as { customerId: string; otp: string };
-        if (!customerId || !otp) {
-          res.status(400).json({ success: false, message: 'Customer ID and OTP are required.' });
-          return;
+          await db.collection('customers').doc(newCustomerId).set(responseCustomer);
+          await trackUsage({ reads: totalReads + 1, writes: 2, customersReads: totalReads });
         }
 
-        const customerDocRef = db.collection('customers').doc(customerId);
-        const snap = await customerDocRef.get();
-        if (!snap.exists) {
-          await trackUsage({ reads: 1, customersReads: 1 });
-          res.status(404).json({ success: false, message: 'Customer not found.' });
-          return;
-        }
+        delete responseCustomer.otp;
+        delete responseCustomer.otpExpiry;
 
-        const customerData = snap.data() as any;
-        if (customerData.status === 'blocked') {
-          await trackUsage({ reads: 1, customersReads: 1 });
-          res.status(403).json({ success: false, message: 'This account is permanently blocked.' });
-          return;
-        }
-
-        if (customerData.otp === otp) {
-          const generateReferralCode = () => {
-            return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
-          };
-          const referralCode = customerData.referralCode ?? generateReferralCode();
-          
-          const updatedCustomer = {
-            ...customerData,
-            verified: true,
-            referralCode,
-            otp: admin.firestore.FieldValue.delete(),
-            otpExpiry: admin.firestore.FieldValue.delete()
-          };
-
-          await customerDocRef.set(updatedCustomer, { merge: true });
-          await trackUsage({ reads: 1, writes: 1, customersReads: 1 });
-
-          delete updatedCustomer.otp;
-          delete updatedCustomer.otpExpiry;
-
-          res.json({
-            success: true,
-            customer: {
-              ...updatedCustomer,
-              verified: true,
-              referralCode
-            }
-          });
-          return;
-        } else {
-          await trackUsage({ reads: 1, customersReads: 1 });
-          res.status(400).json({ success: false, message: 'Incorrect OTP. Please try again.' });
-          return;
-        }
+        res.json({
+          success: true,
+          customer: responseCustomer
+        });
+        return;
       }
 
       // Default: save customer profile (existing POST logic)
