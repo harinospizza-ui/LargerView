@@ -1,9 +1,10 @@
 
 export enum Category {
   PIZZA = 'Pizza',
-  MOMOS_FRIES = 'Momos & Fries',
+  MOMOS = 'Momos',
+  FRIES = 'Fries',
   BURGERS = 'Burgers',
-  SIDES = 'Side-Orders',
+  SIDES = 'Sides',
   BEVERAGES = 'Beverages'
 }
 
@@ -152,8 +153,11 @@ export interface AdminSession {
 
 export interface CustomerProfile {
   id: string;
+  customerId?: string;
   name: string;
+  fullName?: string;
   phone: string;
+  mobileNumber?: string;
   email?: string;
   loginMethod: 'email' | 'phone';
   verified?: boolean;
@@ -165,8 +169,11 @@ export interface CustomerProfile {
   otp?: string;
   otpExpiry?: number;
   createdAt: string;
+  lastLogin?: string;
+  active?: boolean;
   walletBalance?: number;
   rewardPoints?: number;
+  loyaltyPoints?: number;
   referralCodeUsed?: boolean;
   referralAttemptsRemaining?: number;
   referralLocked?: boolean;

@@ -404,6 +404,97 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
+      if (action === 'register') {
+        if (!checkBusinessHours()) {
+          res.status(403).json({
+            success: false,
+            message: "Harino's online ordering is available between 11:00 AM and 9:00 PM."
+          });
+          return;
+        }
+
+        const { phone, name } = req.body as { phone: string; name: string };
+        if (!phone || !name) {
+          res.status(400).json({ success: false, message: 'Name and phone number are required.' });
+          return;
+        }
+
+        const cleanPhone = (p: string) => p.replace(/\D/g, '');
+        const targetPhone = cleanPhone(phone);
+
+        // Check if phone is blocked
+        const blockedRef = db.collection('blocked_customers').doc(targetPhone);
+        const blockedSnap = await blockedRef.get();
+        if (blockedSnap.exists) {
+          await trackUsage({ reads: 1 });
+          res.status(403).json({ success: false, message: 'This mobile number is permanently blocked.' });
+          return;
+        }
+
+        // Check if customer already exists
+        const existingQuery = await db.collection('customers').where('phone', '==', phone).get();
+        if (!existingQuery.empty) {
+          await trackUsage({ reads: existingQuery.size });
+          res.status(400).json({ success: false, message: 'This phone number is already registered. Please login instead.' });
+          return;
+        }
+
+        const customerId = `cust_${Date.now()}`;
+        const referralCode = Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+        const nowStr = new Date().toISOString();
+
+        const newCustomer = {
+          id: customerId,
+          customerId: customerId,
+          name: name.trim(),
+          fullName: name.trim(),
+          phone: phone,
+          mobileNumber: phone,
+          email: '',
+          loginMethod: 'phone',
+          verified: false,
+          walletBalance: 0,
+          loyaltyPoints: 0,
+          rewardPoints: 0,
+          active: true,
+          status: 'active',
+          createdAt: nowStr,
+          lastLogin: nowStr,
+          referralAttemptsRemaining: 3,
+          referralCodeUsed: false,
+          referralLocked: false,
+          referralCode
+        };
+
+        // Write customer profile immediately
+        await db.collection('customers').doc(customerId).set(newCustomer);
+
+        // Generate initial verification request
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const requestId = `req_${Date.now()}`;
+        await db.collection('customerVerificationRequests').doc(requestId).set({
+          requestId,
+          customerId,
+          customerName: name.trim(),
+          mobileNumber: phone,
+          otp,
+          status: 'pending',
+          createdAt: nowStr,
+          verifiedAt: null,
+          verifiedBy: null
+        });
+
+        await trackUsage({ reads: existingQuery.size + 1, writes: 2 });
+
+        res.json({
+          success: true,
+          customer: newCustomer,
+          requestId,
+          message: 'Account created successfully!'
+        });
+        return;
+      }
+
       if (action === 'login-init') {
         if (!checkBusinessHours()) {
           res.status(403).json({
@@ -413,7 +504,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
 
-        const { phone, name, isRegistering } = req.body as { phone: string; name?: string; isRegistering?: boolean };
+        const { phone } = req.body as { phone: string };
         if (!phone) {
           res.status(400).json({ success: false, message: 'Phone number is required.' });
           return;
@@ -426,8 +517,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const blockedRef = db.collection('blocked_customers').doc(targetPhone);
         const blockedSnap = await blockedRef.get();
         if (blockedSnap.exists) {
-          await trackUsage({ reads: 1, customersReads: 1 });
-          res.status(403).json({ success: false, message: 'This mobile number is permanently blocked.' });
+          await trackUsage({ reads: 1 });
+          res.status(403).json({ success: false, message: 'Account disabled' });
+          return;
+        }
+
+        // Search for existing customer
+        let existingCustomer: any = null;
+        let querySnap = await db.collection('customers').where('phone', '==', phone).get();
+        let totalReads = 1 + (querySnap.size || 1);
+        if (querySnap.empty && targetPhone !== phone) {
+          querySnap = await db.collection('customers').where('phone', '==', targetPhone).get();
+          totalReads += querySnap.size || 1;
+        }
+
+        if (!querySnap.empty) {
+          existingCustomer = querySnap.docs[0].data();
+        } else {
+          // fallback scan
+          const snapshot = await db.collection('customers').limit(500).get();
+          totalReads += snapshot.size;
+          const match = snapshot.docs.find(doc => {
+            const data = doc.data() as any;
+            return data.phone && cleanPhone(data.phone) === targetPhone;
+          });
+          if (match) {
+            existingCustomer = match.data();
+          }
+        }
+
+        if (!existingCustomer) {
+          await trackUsage({ reads: totalReads });
+          res.status(404).json({ success: false, message: 'User not found' });
+          return;
+        }
+
+        if (existingCustomer.active === false || existingCustomer.status === 'blocked') {
+          await trackUsage({ reads: totalReads });
+          res.status(403).json({ success: false, message: 'Account disabled' });
           return;
         }
 
@@ -440,7 +567,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const requestDocRef = db.collection('customerVerificationRequests').doc(requestId);
           await requestDocRef.set({
             requestId,
-            customerName: name?.trim() || 'Customer',
+            customerId: existingCustomer.customerId || existingCustomer.id,
+            customerName: existingCustomer.fullName || existingCustomer.name || 'Customer',
             mobileNumber: phone,
             otp,
             status: 'pending',
@@ -453,12 +581,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const isPermissionDenied = err.code === 7 || err.message?.toLowerCase().includes('permission');
           res.status(500).json({
             success: false,
-            message: isPermissionDenied ? 'Firestore permission denied' : 'Verification request write failed'
+            message: isPermissionDenied ? 'Firestore permission denied' : 'Verification failed'
           });
           return;
         }
 
-        await trackUsage({ reads: 1, writes: 1 });
+        await trackUsage({ reads: totalReads, writes: 1 });
 
         res.json({
           success: true,
@@ -487,20 +615,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const requestSnap = await requestDocRef.get();
         if (!requestSnap.exists) {
           await trackUsage({ reads: 1 });
-          res.status(404).json({ success: false, message: 'Verification request not found.' });
+          res.status(404).json({ success: false, message: 'Verification failed' });
           return;
         }
 
         const verificationRequest = requestSnap.data() as any;
-        if (verificationRequest.status === 'verified') {
-          await trackUsage({ reads: 1 });
-          res.status(400).json({ success: false, message: 'Verification request already verified.' });
-          return;
-        }
-
         if (verificationRequest.otp !== otp) {
           await trackUsage({ reads: 1 });
-          res.status(400).json({ success: false, message: 'Incorrect OTP. Please try again.' });
+          res.status(400).json({ success: false, message: 'Verification failed' });
           return;
         }
 
@@ -511,84 +633,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           verifiedBy: 'customer'
         });
 
-        // Search for existing customer
-        const phone = verificationRequest.mobileNumber;
-        const cleanPhone = (p: string) => p.replace(/\D/g, '');
-        const targetPhone = cleanPhone(phone);
+        const customerId = verificationRequest.customerId;
+        const customerRef = db.collection('customers').doc(customerId);
+        const customerSnap = await customerRef.get();
 
-        let existingCustomer: any = null;
-        let querySnap = await db.collection('customers').where('phone', '==', phone).get();
-        let totalReads = 1 + (querySnap.size || 1);
-        if (querySnap.empty && targetPhone !== phone) {
-          querySnap = await db.collection('customers').where('phone', '==', targetPhone).get();
-          totalReads += querySnap.size || 1;
+        if (!customerSnap.exists) {
+          await trackUsage({ reads: 2, writes: 1 });
+          res.status(404).json({ success: false, message: 'User not found' });
+          return;
         }
 
-        if (!querySnap.empty) {
-          existingCustomer = querySnap.docs[0].data();
-        } else {
-          // fallback scan
-          const snapshot = await db.collection('customers').limit(500).get();
-          totalReads += snapshot.size;
-          const match = snapshot.docs.find(doc => {
-            const data = doc.data() as any;
-            return data.phone && cleanPhone(data.phone) === targetPhone;
-          });
-          if (match) {
-            existingCustomer = match.data();
-          }
+        const customerData = customerSnap.data() as any;
+        if (customerData.active === false || customerData.status === 'blocked') {
+          await trackUsage({ reads: 2, writes: 1 });
+          res.status(403).json({ success: false, message: 'Account disabled' });
+          return;
         }
 
-        const generateReferralCode = () => {
-          return Math.floor(65536 + Math.random() * 983039).toString(16).toUpperCase();
+        const responseCustomer = {
+          ...customerData,
+          verified: true,
+          lastLogin: new Date().toISOString(),
+          otp: admin.firestore.FieldValue.delete(),
+          otpExpiry: admin.firestore.FieldValue.delete()
         };
 
-        let responseCustomer: any = null;
-
-        if (existingCustomer) {
-          if (existingCustomer.status === 'blocked') {
-            await trackUsage({ reads: totalReads + 1, writes: 1 });
-            res.status(403).json({ success: false, message: 'This account is permanently blocked.' });
-            return;
-          }
-
-          const referralCode = existingCustomer.referralCode ?? generateReferralCode();
-          responseCustomer = {
-            ...existingCustomer,
-            verified: true,
-            referralCode,
-            otp: admin.firestore.FieldValue.delete(),
-            otpExpiry: admin.firestore.FieldValue.delete()
-          };
-
-          await db.collection('customers').doc(existingCustomer.id).set(responseCustomer, { merge: true });
-          await trackUsage({ reads: totalReads + 1, writes: 2, customersReads: totalReads });
-        } else {
-          const newCustomerId = `cust_${Date.now()}`;
-          const referralCode = generateReferralCode();
-          responseCustomer = {
-            id: newCustomerId,
-            name: verificationRequest.customerName,
-            phone: phone,
-            email: '',
-            loginMethod: 'phone',
-            verified: true,
-            createdAt: new Date().toISOString(),
-            walletBalance: 0,
-            rewardPoints: 0,
-            status: 'active',
-            referralAttemptsRemaining: 3,
-            referralCodeUsed: false,
-            referralLocked: false,
-            referralCode
-          };
-
-          await db.collection('customers').doc(newCustomerId).set(responseCustomer);
-          await trackUsage({ reads: totalReads + 1, writes: 2, customersReads: totalReads });
-        }
-
-        delete responseCustomer.otp;
-        delete responseCustomer.otpExpiry;
+        await customerRef.set(responseCustomer, { merge: true });
+        await trackUsage({ reads: 2, writes: 2 });
 
         res.json({
           success: true,

@@ -32,7 +32,7 @@ export const AdminVerificationRequests: React.FC<AdminVerificationRequestsProps>
     if (phone.length === 10) {
       phone = '91' + phone;
     }
-    const message = `Hello ${req.customerName},\n\nYour Harino's verification code is:\n\n${req.otp}\n\nEnter this code in the Harino's app to verify your account.\n\nThank you,\nHarino's Pizza`;
+    const message = `Hello ${req.customerName},\n\nYour Harino's verification code is:\n\n${req.otp}\n\nThank you,\nHarino's Pizza`;
     const encoded = encodeURIComponent(message);
     window.open(`https://wa.me/${phone}?text=${encoded}`, '_blank');
   };

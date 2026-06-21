@@ -55,6 +55,14 @@ const logSecurityEvent = async (action: string, username: string, details: strin
   }
 };
 
+const checkBusinessHours = (): boolean => {
+  const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const ist = new Date(utc + (3600000 * 5.5)); // IST is UTC + 5.5
+  const hours = ist.getHours();
+  return hours >= 11 && hours < 21;
+};
+
 type OrderStatus = 'new' | 'preparing' | 'ready' | 'out_for_delivery' | 'done' | 'cancelled';
 type NotificationRole = 'admin' | 'manager' | 'staff' | 'customer';
 type NotificationEventType = 'NEW_ORDER' | 'PREPARING' | 'READY' | 'OUT_FOR_DELIVERY' | 'DONE' | 'CANCELLED';
@@ -372,14 +380,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
+      if (status === 'cancelled') {
+        // Permanently delete order
+        await orderRef.delete();
+        await logSecurityEvent('ORDER_CANCELLED', caller.username, `Permanently deleted order: ${orderId}, Reason: ${reason}`);
+        await trackUsage({ reads: 1, writes: 2, ordersReads: 1 });
+
+        // Dispatch FCM notifications
+        const customerId = order.customerPhone || order.customerEmail || order.customerName || order.customerId;
+        const addData = { reason: reason || '' };
+        if (customerId) {
+          void sendNotificationToCustomer('CANCELLED', orderId, customerId, addData).catch((err) =>
+            console.error('Error sending customer status FCM:', err)
+          );
+        }
+        void sendNotificationToRole('CANCELLED', orderId, 'admin', undefined, addData).catch((err) =>
+          console.error('Error notifying admin of cancellation:', err)
+        );
+        if (order.outletId) {
+          void sendNotificationToRole('CANCELLED', orderId, 'manager', order.outletId, addData).catch((err) =>
+            console.error('Error notifying manager of cancellation:', err)
+          );
+        }
+
+        res.json({ success: true, message: 'Order cancelled and deleted successfully.' });
+        return;
+      }
+
       const processOrderStatusUpdate = (orderData: any) => {
         orderData.status = status;
         orderData.statusUpdatedAt = new Date().toISOString();
         orderData.updatedBy = caller.username;
-        if (status === 'cancelled') {
-          orderData.cancelledBy = caller.username;
-          orderData.cancellationReason = reason;
-        }
         if (!orderData.auditTrail) orderData.auditTrail = [];
         orderData.auditTrail.push({
           timestamp: new Date().toISOString(),
@@ -394,17 +425,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const updated = processOrderStatusUpdate(order);
       await orderRef.set(updated, { merge: true });
-
-      let writeCount = 1;
-      if (status === 'cancelled') {
-        await logSecurityEvent('ORDER_CANCELLED', caller.username, `Order: ${orderId}, Reason: ${reason}`);
-        writeCount++;
-      }
-      
-      await trackUsage({ reads: 1, writes: writeCount, ordersReads: 1 });
+      await trackUsage({ reads: 1, writes: 1, ordersReads: 1 });
       
       // Dispatch FCM notifications
-      const customerNotifiableStatuses = ['preparing', 'ready', 'out_for_delivery', 'done', 'cancelled'];
+      const customerNotifiableStatuses = ['preparing', 'ready', 'out_for_delivery', 'done'];
       if (customerNotifiableStatuses.includes(status)) {
         const customerId = updated.customerPhone || updated.customerEmail || updated.customerName;
         const eventTypeMap: Record<OrderStatus, NotificationEventType | null> = {
@@ -413,24 +437,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ready: 'READY',
           out_for_delivery: 'OUT_FOR_DELIVERY',
           done: 'DONE',
-          cancelled: 'CANCELLED',
+          cancelled: null,
         };
         const eventType = eventTypeMap[status];
         if (eventType && customerId) {
-          const addData = status === 'cancelled' ? { reason: reason || '' } : undefined;
-          void sendNotificationToCustomer(eventType, orderId, customerId, addData).catch((err) =>
+          void sendNotificationToCustomer(eventType, orderId, customerId).catch((err) =>
             console.error('Error sending customer status FCM:', err)
-          );
-        }
-      }
-
-      if (status === 'cancelled') {
-        void sendNotificationToRole('CANCELLED', orderId, 'admin', undefined, { reason: reason || '' }).catch((err) =>
-          console.error('Error notifying admin of cancellation:', err)
-        );
-        if (updated.outletId) {
-          void sendNotificationToRole('CANCELLED', orderId, 'manager', updated.outletId, { reason: reason || '' }).catch((err) =>
-            console.error('Error notifying manager of cancellation:', err)
           );
         }
       }
@@ -491,23 +503,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
 
-        const updated = {
-          ...order,
-          isDeleted: true,
-          deletedBy: caller.username,
-          deletedAt: new Date().toISOString(),
-          auditTrail: [
-            ...(order.auditTrail || []),
-            {
-              timestamp: new Date().toISOString(),
-              updatedBy: caller.username,
-              action: 'Order soft deleted'
-            }
-          ]
-        };
-
-        await orderRef.set(updated, { merge: true });
-        await logSecurityEvent('ORDER_DELETED', caller.username, `Soft deleted order: ${orderId}`);
+        // Permanently delete order
+        await orderRef.delete();
+        await logSecurityEvent('ORDER_DELETED', caller.username, `Permanently deleted order: ${orderId}`);
         await trackUsage({ reads: 1, writes: 2, ordersReads: 1 });
         res.json({ success: true, message: 'Order deleted successfully.' });
         return;
@@ -596,6 +594,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!Array.isArray(order.items)) {
         res.status(400).json({ success: false, message: 'Invalid order payload: items list is required.' });
         return;
+      }
+
+      // Enforce business hours for customers
+      const caller = authenticateRequest(req);
+      const isStaffOrAdmin = caller && (caller.role === 'admin' || caller.role === 'manager' || caller.role === 'staff');
+      if (!isStaffOrAdmin && !checkBusinessHours()) {
+        res.status(403).json({
+          success: false,
+          message: "Harino's online ordering is available between 11:00 AM and 9:00 PM."
+        });
+        return;
+      }
+
+      // Enforce Beverages available for Dine-In only
+      if (order.orderType !== 'dinein') {
+        const hasBeverages = order.items.some((it: any) => it.category === 'Beverages');
+        if (hasBeverages) {
+          res.status(400).json({ success: false, message: 'Beverages are available for Dine-In only.' });
+          return;
+        }
+      }
+
+      // Enforce 5 KM maximum delivery radius
+      if (order.orderType === 'delivery') {
+        const distance = order.distanceKm ?? order.distance;
+        if (distance === undefined || distance === null) {
+          res.status(400).json({ success: false, message: 'Delivery location and distance is required.' });
+          return;
+        }
+        if (distance > 5) {
+          res.status(400).json({ success: false, message: 'Delivery is only available within 5 KM.' });
+          return;
+        }
       }
 
       // Check if customer phone or ID is blocked

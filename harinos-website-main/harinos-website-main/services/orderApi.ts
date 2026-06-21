@@ -280,6 +280,27 @@ export const getServerCustomerById = async (customerId: string): Promise<Custome
   }
 };
 
+export const registerCustomer = async (
+  phone: string,
+  name: string
+): Promise<{ success: boolean; customer: CustomerProfile; requestId: string; message?: string }> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('Central API is not configured.');
+  
+  const response = await fetch(`${apiBase}/customers?action=register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, name }),
+  });
+  
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.message || 'Registration failed.');
+  }
+  
+  return await response.json();
+};
+
 export const initCustomerLogin = async (
   phone: string,
   name?: string,

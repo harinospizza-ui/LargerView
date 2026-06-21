@@ -191,9 +191,8 @@ const MenuSection: React.FC<MenuSectionProps> = ({ items, onAddToCart, offers, c
       !signaturePizzas.includes(item)
   );
 
-  const momosFries = items.filter((item) => item.category === Category.MOMOS_FRIES);
-  const momos = momosFries.filter((item) => item.id.startsWith('m') || item.name.toLowerCase().includes('momo'));
-  const fries = momosFries.filter((item) => !momos.includes(item));
+  const momos = items.filter((item) => item.category === Category.MOMOS);
+  const fries = items.filter((item) => item.category === Category.FRIES);
 
   const burgers = items.filter((item) => item.category === Category.BURGERS);
   const sides = items.filter((item) => item.category === Category.SIDES);

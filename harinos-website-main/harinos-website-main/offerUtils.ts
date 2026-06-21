@@ -19,7 +19,8 @@ interface ParsedOfferCondition {
 
 const CATEGORY_KEYWORDS: Array<{ category: Category; keywords: string[] }> = [
   { category: Category.PIZZA, keywords: ['pizza', 'pizzas'] },
-  { category: Category.MOMOS_FRIES, keywords: ['momos', 'momo', 'fries', 'momos fries'] },
+  { category: Category.MOMOS, keywords: ['momos', 'momo'] },
+  { category: Category.FRIES, keywords: ['fries'] },
   { category: Category.BURGERS, keywords: ['burger', 'burgers'] },
   { category: Category.SIDES, keywords: ['sides', 'side order', 'side orders', 'garlic bread', 'calzone'] },
   { category: Category.BEVERAGES, keywords: ['beverage', 'beverages', 'drink', 'drinks'] },

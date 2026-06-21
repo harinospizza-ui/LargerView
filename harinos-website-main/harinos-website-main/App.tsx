@@ -1100,9 +1100,9 @@ const App: React.FC = () => {
         return;
       }
 
-      if (checkoutContext.distanceKm > checkoutContext.outlet.deliveryRadiusKm) {
+      if (checkoutContext.distanceKm > 5 || checkoutContext.distanceKm > checkoutContext.outlet.deliveryRadiusKm) {
         alert(
-          `Sorry, ${checkoutContext.outlet.name} currently serves only up to ${checkoutContext.outlet.deliveryRadiusKm} km by road.`,
+          `Sorry, we only deliver up to 5 km by road. Your distance is ${checkoutContext.distanceKm.toFixed(1)} km.`,
         );
         return;
       }

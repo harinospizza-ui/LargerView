@@ -1,10 +1,10 @@
-import { validateSession } from '../api/sessionUtils.js';
-import * as auth from '../api/auth.js';
-import * as customers from '../api/customers.js';
-import * as wallet from '../api/wallet.js';
-import * as orders from '../api/orders.js';
-import * as settings from '../api/settings.js';
-import * as notifications from '../api/notifications.js';
+import { validateSession } from '../api/handlers/sessionUtils.js';
+import * as auth from '../api/handlers/auth.js';
+import * as customers from '../api/handlers/customers.js';
+import * as wallet from '../api/handlers/wallet.js';
+import * as orders from '../api/handlers/orders.js';
+import * as settings from '../api/handlers/settings.js';
+import * as notifications from '../api/handlers/notifications.js';
 
 console.log('--- STARTING INTEGRITY CHECKS ---');
 

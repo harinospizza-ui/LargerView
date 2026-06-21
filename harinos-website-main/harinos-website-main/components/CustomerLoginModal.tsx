@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CustomerProfile } from '../types';
-import { initCustomerLogin, verifyCustomerLogin } from '../services/orderApi';
+import { initCustomerLogin, verifyCustomerLogin, registerCustomer } from '../services/orderApi';
 
 const checkBusinessHours = (): boolean => {
   const now = new Date();
@@ -50,7 +50,7 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
     logoHoldTimer.current = null;
   };
 
-  const handleSendOtp = async () => {
+  const handleRegister = async () => {
     setError('');
     
     if (!checkBusinessHours()) {
@@ -60,7 +60,7 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
 
     const cleanPhone = phone.replace(/\D/g, '');
     
-    if (mode === 'register' && !name.trim()) {
+    if (!name.trim()) {
       setError('Please enter your full name.');
       return;
     }
@@ -71,8 +71,41 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
 
     setLoading(true);
     try {
-      const isRegister = mode === 'register';
-      const result = await initCustomerLogin(phone, isRegister ? name.trim() : undefined, isRegister);
+      const result = await registerCustomer(phone, name.trim());
+      if (result.success && result.customer) {
+        if (result.requestId) {
+          localStorage.setItem('harinos_pending_verification_request_id', result.requestId);
+        }
+        alert('Account created successfully! You can use the app immediately. Verification is pending.');
+        onSave(result.customer);
+      } else {
+        setError(result.message || 'Registration failed. Please try again.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Network error creating account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendOtp = async () => {
+    setError('');
+    
+    if (!checkBusinessHours()) {
+      setError("Harino's online ordering is available between 11:00 AM and 9:00 PM.");
+      return;
+    }
+
+    const cleanPhone = phone.replace(/\D/g, '');
+    
+    if (cleanPhone.length !== 10) {
+      setError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await initCustomerLogin(phone, undefined, false);
       
       if (result.success) {
         setMode('otp');
@@ -201,11 +234,11 @@ const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ onSave, onAdmin
             </div>
             
             <button
-              onClick={handleSendOtp}
+              onClick={handleRegister}
               disabled={loading || !checkBusinessHours()}
-              className="w-full rounded-2xl bg-red-650 bg-red-600 hover:bg-red-500 text-white py-4 text-[11px] font-black uppercase tracking-widest transition-premium active:scale-95 shadow-lg shadow-red-200 disabled:opacity-50"
+              className="w-full rounded-2xl bg-red-655 bg-red-600 hover:bg-red-500 text-white py-4 text-[11px] font-black uppercase tracking-widest transition-premium active:scale-95 shadow-lg shadow-red-200 disabled:opacity-50"
             >
-              {loading ? "Submitting..." : "Request Verification"}
+              {loading ? "Creating..." : "Create Account"}
             </button>
 
             <div className="text-center mt-4">
