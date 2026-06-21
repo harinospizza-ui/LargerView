@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
 import { verifyToken } from './cryptoUtils.js';
 import { trackUsage } from './firestoreUsage.js';
+import { validateSession } from './sessionUtils.js';
 
 const getJWTSecret = (): string => {
   return process.env.JWT_SECRET || 'dev-harinos-pizza-secret-key-32-chars-minimum';
@@ -49,6 +50,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const db = getFirestore();
+
+    const sessionCheck = await validateSession(req, res, db);
+    if (!sessionCheck.success) return;
+
     if (req.method === 'GET') {
       const caller = authenticateRequest(req);
       if (!caller) {

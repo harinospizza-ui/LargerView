@@ -33,6 +33,7 @@ import { AdminMenu } from './AdminMenu';
 import { AdminDashboard } from './AdminDashboard';
 import { AdminUsage } from './AdminUsage';
 import { AdminBackup } from './AdminBackup';
+import { AdminNotifications } from './AdminNotifications';
 
 interface AdminPanelProps {
   session: AdminSession | null;
@@ -123,7 +124,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<CustomerProfile[]>([]);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'orders' | 'wallets' | 'menu' | 'outlets' | 'offers' | 'dashboard' | 'settings' | 'usage' | 'backup'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'wallets' | 'menu' | 'outlets' | 'offers' | 'dashboard' | 'settings' | 'usage' | 'backup' | 'notifications'>('orders');
   const [instagramUrlInput, setInstagramUrlInput] = useState('');
 
 
@@ -350,7 +351,24 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
             >
               Password
             </button>
-            <button onClick={() => { StorageService.clearAdminSession(); onSessionChange(null); }} className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white transition hover:bg-white/20 active:scale-95">Sign Out</button>
+            <button 
+              onClick={async () => {
+                const apiBase = (import.meta.env.VITE_ORDER_API_BASE_URL ?? '/api').trim() || '/api';
+                await fetch(`${apiBase}/auth/logout`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.token}`,
+                    'X-Session-Id': session.sessionId || '',
+                  }
+                }).catch(() => {});
+                StorageService.clearAdminSession(); 
+                onSessionChange(null); 
+              }} 
+              className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white transition hover:bg-white/20 active:scale-95"
+            >
+              Sign Out
+            </button>
             <button onClick={onClose} className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-slate-200 transition active:scale-95">Close</button>
           </div>
         </div>
@@ -389,6 +407,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
         )}
         {session.role === 'admin' && (
           <>
+            <button onClick={() => setActiveTab('notifications')} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium ${activeTab === 'notifications' ? 'bg-gradient-premium border-red-500/30 text-white' : 'bg-white/[0.03] border-white/5 text-slate-400'}`}>
+              Push Notifications
+            </button>
             <button onClick={() => setActiveTab('usage')} className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-premium ${activeTab === 'usage' ? 'bg-gradient-premium border-red-500/30 text-white' : 'bg-white/[0.03] border-white/5 text-slate-400'}`}>
               Cost Usage
             </button>
@@ -436,6 +457,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ session, onSessionChange, onClo
             orders={orders}
             customers={customers}
           />
+        )}
+        {activeTab === 'notifications' && session.role === 'admin' && (
+          <AdminNotifications />
         )}
         {activeTab === 'usage' && session.role === 'admin' && (
           <AdminUsage />

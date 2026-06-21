@@ -65,5 +65,11 @@ service cloud.firestore {
     match /firestore_usage/{usageId} {
       allow read, write, delete: if false;
     }
+
+    // User Sessions Rules: Read-only for owners authenticated via Firebase Auth custom token
+    match /userSessions/{username} {
+      allow read: if request.auth != null && request.auth.uid == username;
+      allow write, delete: if false;
+    }
   }
 }

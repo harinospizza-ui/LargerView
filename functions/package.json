@@ -1,0 +1,23 @@
+{
+  "name": "harinos-pizza-functions",
+  "scripts": {
+    "lint": "tslint --project tsconfig.json",
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "shell": "npm run build && firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions"
+  },
+  "engines": {
+    "node": "18"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "firebase-admin": "^11.11.1",
+    "firebase-functions": "^4.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^4.9.5"
+  },
+  "private": true
+}

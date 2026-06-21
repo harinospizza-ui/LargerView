@@ -19,6 +19,8 @@
     { "src": "/api/offers/seed", "dest": "/api/offers?action=seed" },
     { "src": "/api/offers", "dest": "/api/offers" },
     { "src": "/api/settings", "dest": "/api/settings" },
+    { "src": "/api/auth/logout", "dest": "/api/auth" },
+    { "src": "/api/notifications/dashboard", "dest": "/api/notifications?action=dashboard" },
     { "src": "/api/notifications/token", "dest": "/api/notifications" }
   ]
 }

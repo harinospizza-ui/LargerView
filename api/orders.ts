@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import admin from 'firebase-admin';
 import { verifyToken } from './cryptoUtils.js';
 import { trackUsage } from './firestoreUsage.js';
+import { validateSession } from './sessionUtils.js';
 
 const getJWTSecret = (): string => {
   return process.env.JWT_SECRET || 'dev-harinos-pizza-secret-key-32-chars-minimum';
@@ -201,7 +202,7 @@ const sendNotificationToRole = async (
           errorMsg.includes('not-registered')
         ) {
           if (token.id) {
-            await db.collection('notification_tokens').doc(token.id).update({ isActive: false });
+            await db.collection('notification_tokens').doc(token.id).delete().catch(() => {});
           }
         }
       }
@@ -258,7 +259,7 @@ const sendNotificationToCustomer = async (
           errorMsg.includes('not-registered')
         ) {
           if (token.id) {
-            await db.collection('notification_tokens').doc(token.id).update({ isActive: false });
+            await db.collection('notification_tokens').doc(token.id).delete().catch(() => {});
           }
         }
       }
@@ -326,6 +327,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const db = getFirestore();
+
+    const sessionCheck = await validateSession(req, res, db);
+    if (!sessionCheck.success) return;
 
     // 1. PATCH status update (/api/orders/:orderId/status)
     if (req.method === 'PATCH' && orderId && action === 'status') {

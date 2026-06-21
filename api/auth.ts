@@ -124,9 +124,81 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const token = generateToken({ username: user.username, role: user.role, outletId: user.outletId }, getJWTSecret());
       await logSecurityEvent('SUCCESSFUL_LOGIN', username, `Role: ${user.role}`, clientIp);
       
+      let firebaseToken = '';
+      try {
+        firebaseToken = await admin.auth().createCustomToken(user.username);
+      } catch (e) {
+        console.warn('Failed to generate firebase custom token:', e);
+      }
+      
+      const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const now = new Date().toISOString();
+
+      if (user.role === 'admin' || user.role === 'manager') {
+        const docId = user.username;
+        const currentSessionSnap = await db.collection('userSessions').doc(docId).get();
+        if (currentSessionSnap.exists) {
+          const prevSession = currentSessionSnap.data();
+          await logSecurityEvent('FORCED_LOGOUT', username, `Session ${prevSession?.sessionId} invalidated by new login on another device`, clientIp);
+        }
+
+        await db.collection('userSessions').doc(docId).set({
+          sessionId,
+          username: user.username,
+          role: user.role,
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          deviceType: 'browser',
+          loginTime: now,
+          lastActivity: now,
+          clientIp
+        });
+
+        if (user.role === 'admin') {
+          try {
+            const tokensSnap = await db.collection('notification_tokens')
+              .where('userId', '==', user.username)
+              .where('role', '==', 'admin')
+              .where('isActive', '==', true)
+              .get();
+            const tokens = tokensSnap.docs.map(d => d.data());
+            const messaging = admin.messaging();
+            for (const t of tokens) {
+              await messaging.send({
+                token: t.fcmToken,
+                notification: {
+                  title: '🚨 New Admin Login',
+                  body: `Your account was logged in from a new device/browser.`
+                },
+                data: {
+                  eventType: 'NEW_LOGIN',
+                  username: user.username,
+                  timestamp: now
+                }
+              }).catch(() => {});
+            }
+          } catch (e) {
+            console.warn('Failed to send Admin new-login FCM alert:', e);
+          }
+        }
+      } else {
+        const docId = `${user.username}_${sessionId}`;
+        await db.collection('userSessions').doc(docId).set({
+          sessionId,
+          username: user.username,
+          role: user.role,
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          deviceType: 'browser',
+          loginTime: now,
+          lastActivity: now,
+          clientIp
+        });
+      }
+
       res.json({
         success: true,
         token,
+        sessionId,
+        firebaseToken,
         user: { role: user.role, username: user.username, outletId: user.outletId },
       });
       return;
@@ -157,6 +229,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await docRef.set({ password: hashed }, { merge: true });
       await logSecurityEvent('PASSWORD_CHANGED', caller.username, `Target: ${username}`);
       res.json({ success: true, message: 'Password updated successfully.' });
+      return;
+    }
+
+    if (path === 'auth/logout' || path === '/auth/logout') {
+      const caller = authenticateRequest(req);
+      if (!caller) {
+        res.status(401).json({ success: false, message: 'Unauthorized. Invalid token.' });
+        return;
+      }
+
+      const sessionId = req.headers['x-session-id'] as string;
+      const username = caller.username;
+
+      let docId = username;
+      if (caller.role === 'staff') {
+        docId = `${username}_${sessionId || ''}`;
+      }
+
+      if (sessionId) {
+        await db.collection('userSessions').doc(docId).delete().catch(() => {});
+      }
+
+      await logSecurityEvent('SUCCESSFUL_LOGOUT', username, `Role: ${caller.role}`, clientIp);
+
+      res.json({ success: true, message: 'Logged out successfully.' });
       return;
     }
 

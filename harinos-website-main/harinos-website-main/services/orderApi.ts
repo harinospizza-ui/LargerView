@@ -29,8 +29,13 @@ export const isOrderApiConfigured = (): boolean => Boolean(getApiBase());
 const getAuthHeaders = (): Record<string, string> => {
   const session = StorageService.getAdminSession();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (session && session.token) {
-    headers['Authorization'] = `Bearer ${session.token}`;
+  if (session) {
+    if (session.token) {
+      headers['Authorization'] = `Bearer ${session.token}`;
+    }
+    if (session.sessionId) {
+      headers['X-Session-Id'] = session.sessionId;
+    }
   }
   return headers;
 };
@@ -424,7 +429,9 @@ export const authenticateAdminViaApi = async (username: string, password: string
       const data = await response.json();
       return {
         ...data.user,
-        token: data.token
+        token: data.token,
+        sessionId: data.sessionId,
+        firebaseToken: data.firebaseToken,
       };
     } else {
       const errData = await response.json().catch(() => ({}));
@@ -831,4 +838,29 @@ export const triggerDatabaseRestore = async (filename: string): Promise<any> => 
     throw new Error(err.message || 'Failed to restore database from backup.');
   }
   return await response.json();
+};
+
+export interface NotificationStats {
+  date: string;
+  sent: number;
+  failed: number;
+  removedTokens?: number;
+  updatedAt?: string;
+}
+
+export interface NotificationDashboardData {
+  success: boolean;
+  totalDevices: number;
+  stats: NotificationStats[];
+}
+
+export const getNotificationDashboardData = async (): Promise<NotificationDashboardData> => {
+  const apiBase = getApiBase();
+  if (!apiBase) throw new Error('API is not configured.');
+  const response = await fetch(`${apiBase}/notifications/dashboard`, {
+    headers: getAuthHeaders(),
+    cache: 'no-store'
+  });
+  if (!response.ok) throw new Error('Failed to load notification stats.');
+  return (await response.json()) as NotificationDashboardData;
 };

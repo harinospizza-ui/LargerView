@@ -45,19 +45,19 @@ export const initializeFCM = async (): Promise<string | null> => {
       return null;
     }
 
-    // Register service worker if not already registered
+    let registration: ServiceWorkerRegistration | undefined;
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
       console.log('Service Worker registered for FCM:', registration);
     } catch (swError) {
       console.warn('Service Worker registration failed:', swError);
-      // Continue anyway - FCM can still work with message listener
     }
 
     // Get FCM token
     const messaging = getMessaging(getFirebaseApp());
     const token = await getToken(messaging, {
       vapidKey: (import.meta.env.VITE_FIREBASE_VAPID_KEY ?? '').trim(),
+      serviceWorkerRegistration: registration,
     });
 
     if (!token) {
@@ -109,11 +109,22 @@ export const sendTokenToServer = async (
   }
 
   try {
+    const session = StorageService.getAdminSession();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (session) {
+      if (session.token) {
+        headers['Authorization'] = `Bearer ${session.token}`;
+      }
+      if (session.sessionId) {
+        headers['X-Session-Id'] = session.sessionId;
+      }
+    }
+
     const response = await fetch(`${API_BASE_URL}/notifications/token`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         fcmToken: token,
         role,

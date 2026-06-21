@@ -146,6 +146,8 @@ export interface AdminSession {
   loginTime: string;
   lastActivityTime: string;
   token?: string;
+  firebaseToken?: string;
+  sessionId?: string;
 }
 
 export interface CustomerProfile {
